@@ -43,7 +43,7 @@ pillow
 opencv-python
 scikit-learn
 
-
+sqlalchemy
 
 matplotlib
 opencv-python-headless # Use headless version for better compatibility
