@@ -1,9 +1,5 @@
 import streamlit as st
 import hashlib
-import sqlalchemy
-from sqlalchemy import create_engine, Column, String, Integer, DateTime, JSON, Text, Boolean, Float
-from sqlalchemy.orm import declarative_base
-from sqlalchemy.orm import sessionmaker
 import os
 from datetime import datetime, timedelta
 import pandas as pd
@@ -14,6 +10,21 @@ import secrets
 import string
 import time
 import threading
+
+try:
+    from sqlalchemy import create_engine, Column, String, Integer, DateTime, JSON, Text, Boolean, Float
+    from sqlalchemy.orm import declarative_base, sessionmaker
+    SQLALCHEMY_AVAILABLE = True
+except ImportError:
+    try:
+        from sqlalchemy import create_engine, Column, String, Integer, DateTime, JSON, Text, Boolean, Float
+        from sqlalchemy.ext.declarative import declarative_base
+        from sqlalchemy.orm import sessionmaker
+        SQLALCHEMY_AVAILABLE = True
+    except ImportError:
+        st.error("SQLAlchemy is not installed. Please add 'sqlalchemy' to requirements.txt")
+        SQLALCHEMY_AVAILABLE = False
+        st.stop()
 
 try:
     import plotly.express as px
