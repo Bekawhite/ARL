@@ -1,36 +1,74 @@
 import streamlit as st
 import hashlib
-import sqlalchemy as db
+import sqlalchemy
 from sqlalchemy import create_engine, Column, String, Integer, DateTime, JSON, Text, Boolean, Float
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
 from datetime import datetime, timedelta
 import pandas as pd
-import plotly.express as px
-import pydeck as pdk
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-import numpy as np
-from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib import colors
-from reportlab.lib.units import inch
-import secrets
-import string
-from dotenv import load_dotenv
-import time
-import threading
 import math
 import io
 import json
-import qrcode
-import base64
-from PIL import Image
+import secrets
+import string
+import time
+import threading
 
-load_dotenv()
+try:
+    import plotly.express as px
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+
+try:
+    import pydeck as pdk
+    PYDECK_AVAILABLE = True
+except ImportError:
+    PYDECK_AVAILABLE = False
+
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib import colors
+    from reportlab.lib.units import inch
+    REPORTLAB_AVAILABLE = True
+except ImportError:
+    REPORTLAB_AVAILABLE = False
+
+try:
+    import qrcode
+    QRCODE_AVAILABLE = True
+except ImportError:
+    QRCODE_AVAILABLE = False
+
+try:
+    from PIL import Image
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+
+try:
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    SMTP_AVAILABLE = True
+except ImportError:
+    SMTP_AVAILABLE = False
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 
 # =============================================================================
 # CONFIGURATION
@@ -50,15 +88,16 @@ class Config:
     GOOGLE_MAPS_API_KEY = os.getenv('GOOGLE_MAPS_API_KEY', '')
     NOTIFICATION_CHECK_INTERVAL = 30
     LOCATION_UPDATE_INTERVAL = 10
-    # SHA/SHIF billing config
-    SHA_BASE_CHARGE_KES = 4500.0      # KSh 4,500 for first 25 km
+    SHA_BASE_CHARGE_KES = 4500.0
     SHA_BASE_DISTANCE_KM = 25.0
-    SHA_PER_KM_CHARGE_KES = 75.0     # KSh 75 per additional km
+    SHA_PER_KM_CHARGE_KES = 75.0
+
 
 # =============================================================================
-# DATABASE MODELS — ADDED: BedCapacity, AuditLog, FHIRPatientResource, OfflineQueue
+# DATABASE MODELS
 # =============================================================================
 Base = declarative_base()
+
 
 class Patient(Base):
     __tablename__ = 'patients'
@@ -79,14 +118,13 @@ class Patient(Base):
     status = Column(String, default='Referred')
     assigned_ambulance = Column(String)
     created_by = Column(String)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
     referring_hospital_lat = Column(Float)
     referring_hospital_lng = Column(Float)
     receiving_hospital_lat = Column(Float)
     receiving_hospital_lng = Column(Float)
     pickup_notification_sent = Column(Boolean, default=False)
     enroute_notification_sent = Column(Boolean, default=False)
-    # GAP 2 — SHA billing fields
     national_id = Column(String)
     sha_member_number = Column(String)
     sha_verified = Column(Boolean, default=False)
@@ -94,15 +132,13 @@ class Patient(Base):
     sha_billing_amount_kes = Column(Float)
     sha_distance_km = Column(Float)
     sha_claim_status = Column(String, default='Pending')
-    # GAP 5 — MOH referral letter
     referral_letter_generated = Column(Boolean, default=False)
     referral_letter_path = Column(String)
     moh_referral_number = Column(String)
-    # GAP 4 — FHIR
     fhir_patient_id = Column(String)
-    # GAP 3 — triage
     triage_level = Column(String, default='Green')
     mews_score = Column(Integer, default=0)
+
 
 class Ambulance(Base):
     __tablename__ = 'ambulances'
@@ -124,6 +160,7 @@ class Ambulance(Base):
     fuel_level = Column(Float, default=100.0)
     fuel_consumption_rate = Column(Float, default=0.1)
 
+
 class Referral(Base):
     __tablename__ = 'referrals'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -132,6 +169,7 @@ class Referral(Base):
     status = Column(String, default='Ambulance Dispatched')
     ambulance_id = Column(String)
     created_by = Column(String)
+
 
 class HandoverForm(Base):
     __tablename__ = 'handover_forms'
@@ -153,6 +191,7 @@ class HandoverForm(Base):
     ambulance_id = Column(String)
     created_by = Column(String)
 
+
 class Communication(Base):
     __tablename__ = 'communications'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -164,6 +203,7 @@ class Communication(Base):
     timestamp = Column(DateTime, default=datetime.utcnow)
     message_type = Column(String)
 
+
 class LocationUpdate(Base):
     __tablename__ = 'location_updates'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -174,7 +214,7 @@ class LocationUpdate(Base):
     timestamp = Column(DateTime, default=datetime.utcnow)
     patient_id = Column(String)
 
-# GAP 3 — Bed Capacity model
+
 class BedCapacity(Base):
     __tablename__ = 'bed_capacity'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -191,10 +231,10 @@ class BedCapacity(Base):
     surgeon_available = Column(Boolean, default=False)
     obstetrician_available = Column(Boolean, default=False)
     paediatrician_available = Column(Boolean, default=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
     updated_by = Column(String)
 
-# GAP 2 — SHA member verification cache
+
 class SHAMember(Base):
     __tablename__ = 'sha_members'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -205,7 +245,7 @@ class SHAMember(Base):
     cover_type = Column(String, default='SHIF')
     verified_at = Column(DateTime, default=datetime.utcnow)
 
-# GAP 2 — SHA Claim records
+
 class SHAClaim(Base):
     __tablename__ = 'sha_claims'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -221,7 +261,7 @@ class SHAClaim(Base):
     approved_at = Column(DateTime)
     notes = Column(Text)
 
-# GAP 4 — Audit Log
+
 class AuditLog(Base):
     __tablename__ = 'audit_log'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -234,7 +274,7 @@ class AuditLog(Base):
     ip_address = Column(String)
     timestamp = Column(DateTime, default=datetime.utcnow)
 
-# GAP 1 — Offline queue
+
 class OfflineQueue(Base):
     __tablename__ = 'offline_queue'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -245,18 +285,17 @@ class OfflineQueue(Base):
     synced_at = Column(DateTime)
     error_message = Column(Text)
 
+
 # =============================================================================
-# DATABASE SERVICE — ADDED NEW METHODS FOR ALL 5 CRITICAL GAPS
+# DATABASE SERVICE
 # =============================================================================
 class Database:
     def __init__(self):
-        if os.getenv('DATABASE_URL'):
-            self.engine = create_engine(os.getenv('DATABASE_URL'))
-        else:
-            self.engine = create_engine('sqlite:///hospital_referral.db')
+        db_url = os.getenv('DATABASE_URL', 'sqlite:///hospital_referral.db')
+        self.engine = create_engine(db_url)
         Base.metadata.create_all(self.engine)
-        Session = sessionmaker(bind=self.engine)
-        self.session = Session()
+        SessionLocal = sessionmaker(bind=self.engine)
+        self.session = SessionLocal()
 
     def add_patient(self, patient_data):
         if 'patient_id' not in patient_data:
@@ -305,10 +344,14 @@ class Database:
         return communication
 
     def get_communications_for_patient(self, patient_id):
-        return self.session.query(Communication).filter(Communication.patient_id == patient_id).order_by(Communication.timestamp.desc()).all()
+        return self.session.query(Communication).filter(
+            Communication.patient_id == patient_id
+        ).order_by(Communication.timestamp.desc()).all()
 
     def get_communications_for_ambulance(self, ambulance_id):
-        return self.session.query(Communication).filter(Communication.ambulance_id == ambulance_id).order_by(Communication.timestamp.desc()).all()
+        return self.session.query(Communication).filter(
+            Communication.ambulance_id == ambulance_id
+        ).order_by(Communication.timestamp.desc()).all()
 
     def add_location_update(self, location_data):
         location_update = LocationUpdate(**location_data)
@@ -344,9 +387,9 @@ class Database:
         R = 6371
         dlat = math.radians(lat2 - lat1)
         dlon = math.radians(lon2 - lon1)
-        a = (math.sin(dlat/2) * math.sin(dlat/2) +
+        a = (math.sin(dlat / 2) * math.sin(dlat / 2) +
              math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
-             math.sin(dlon/2) * math.sin(dlon/2))
+             math.sin(dlon / 2) * math.sin(dlon / 2))
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
         return R * c
 
@@ -362,7 +405,6 @@ class Database:
             return ambulance.fuel_level
         return None
 
-    # ---- GAP 3: Bed Capacity methods ----
     def get_bed_capacity(self, hospital_name):
         return self.session.query(BedCapacity).filter(BedCapacity.hospital_name == hospital_name).first()
 
@@ -385,7 +427,6 @@ class Database:
         return cap
 
     def get_capacity_status(self, hospital_name):
-        """Returns 'green', 'amber', or 'red' based on occupancy."""
         cap = self.get_bed_capacity(hospital_name)
         if not cap or cap.total_beds == 0:
             return 'unknown', 0
@@ -396,9 +437,7 @@ class Database:
             return 'amber', occupancy_pct
         return 'green', occupancy_pct
 
-    # ---- GAP 2: SHA methods ----
     def verify_sha_member(self, sha_number_or_id):
-        """Look up SHA member by SHA number or national ID."""
         member = self.session.query(SHAMember).filter(
             (SHAMember.sha_member_number == sha_number_or_id) |
             (SHAMember.national_id == sha_number_or_id)
@@ -406,7 +445,6 @@ class Database:
         return member
 
     def create_sha_claim(self, patient_id, ambulance_id, distance_km):
-        """Create a SHA claim using the official tariff schedule."""
         if distance_km <= Config.SHA_BASE_DISTANCE_KM:
             base_charge = Config.SHA_BASE_CHARGE_KES
             additional_charge = 0.0
@@ -438,7 +476,6 @@ class Database:
     def get_sha_claims(self):
         return self.session.query(SHAClaim).order_by(SHAClaim.submitted_at.desc()).all()
 
-    # ---- GAP 4: Audit log ----
     def log_action(self, user_id, user_role, action, resource_type, resource_id='', details=''):
         entry = AuditLog(
             user_id=user_id,
@@ -455,7 +492,6 @@ class Database:
     def get_audit_logs(self, limit=100):
         return self.session.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(limit).all()
 
-    # ---- GAP 1: Offline queue ----
     def queue_offline_action(self, action_type, payload):
         item = OfflineQueue(action_type=action_type, payload=payload)
         self.session.add(item)
@@ -474,8 +510,9 @@ class Database:
                 item.error_message = error
             self.session.commit()
 
+
 # =============================================================================
-# AUTHENTICATION (UNCHANGED)
+# AUTHENTICATION
 # =============================================================================
 class Authentication:
     def __init__(self):
@@ -549,24 +586,18 @@ class Authentication:
             return False
         return True
 
-# =============================================================================
-# SERVICES — ENHANCED WITH 5 CRITICAL GAPS
-# =============================================================================
 
-# ---- GAP 2: SHA Billing Service ----
+# =============================================================================
+# SHA BILLING SERVICE
+# =============================================================================
 class SHABillingService:
-    def __init__(self, db):
-        self.db = db
+    def __init__(self, database):
+        self.database = database
 
     def verify_member(self, identifier):
-        """Verify SHA/SHIF membership. Returns member or None."""
-        # In production this would call the SHA API endpoint.
-        # Here we check the local cache and fall back to demo mode.
-        member = self.db.verify_sha_member(identifier)
-        return member
+        return self.database.verify_sha_member(identifier)
 
     def calculate_billing(self, distance_km):
-        """Calculate SHA ambulance billing per official tariff."""
         if distance_km <= Config.SHA_BASE_DISTANCE_KM:
             base = Config.SHA_BASE_CHARGE_KES
             extra = 0.0
@@ -578,14 +609,17 @@ class SHABillingService:
             'additional_charge': round(extra, 2),
             'total': round(base + extra, 2),
             'distance_km': round(distance_km, 2),
-            'tariff_note': f"KSh {Config.SHA_BASE_CHARGE_KES:,.0f} base (0–{Config.SHA_BASE_DISTANCE_KM:.0f} km) + KSh {Config.SHA_PER_KM_CHARGE_KES:.0f}/km thereafter"
+            'tariff_note': (
+                f"KSh {Config.SHA_BASE_CHARGE_KES:,.0f} base "
+                f"(0–{Config.SHA_BASE_DISTANCE_KM:.0f} km) + "
+                f"KSh {Config.SHA_PER_KM_CHARGE_KES:.0f}/km thereafter"
+            )
         }
 
     def submit_claim(self, patient_id, ambulance_id, distance_km):
-        return self.db.create_sha_claim(patient_id, ambulance_id, distance_km)
+        return self.database.create_sha_claim(patient_id, ambulance_id, distance_km)
 
     def render_sha_panel(self, patient=None):
-        """Render SHA verification and billing panel inside a referral form."""
         st.subheader("🏛️ SHA / SHIF Insurance Integration")
         col1, col2 = st.columns(2)
         with col1:
@@ -610,22 +644,26 @@ class SHABillingService:
         if st.session_state.get('sha_verified'):
             m = st.session_state.get('sha_member')
             if m:
-                st.markdown(f"""
-                <div style="background:#E1F5EE;padding:10px 14px;border-radius:8px;margin-top:8px;">
-                <b>✅ Verified Member</b><br>
-                Name: {m.member_name} &nbsp;|&nbsp; Cover: {m.cover_type} &nbsp;|&nbsp; Active: {'Yes' if m.active else 'No'}
-                </div>""", unsafe_allow_html=True)
-
+                st.markdown(
+                    f'<div style="background:#E1F5EE;padding:10px 14px;border-radius:8px;margin-top:8px;">'
+                    f'<b>✅ Verified Member</b><br>'
+                    f'Name: {m.member_name} &nbsp;|&nbsp; Cover: {m.cover_type} &nbsp;|&nbsp; '
+                    f'Active: {"Yes" if m.active else "No"}'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
         return national_id, sha_number
 
 
-# ---- GAP 3: Bed Capacity Service ----
+# =============================================================================
+# BED CAPACITY SERVICE
+# =============================================================================
 class BedCapacityService:
-    def __init__(self, db):
-        self.db = db
+    def __init__(self, database):
+        self.database = database
 
     def get_capacity_badge(self, hospital_name):
-        status, pct = self.db.get_capacity_status(hospital_name)
+        status, pct = self.database.get_capacity_status(hospital_name)
         if status == 'red':
             return f"🔴 {pct:.0f}% full", "red"
         elif status == 'amber':
@@ -636,14 +674,14 @@ class BedCapacityService:
 
     def render_capacity_dashboard(self):
         st.subheader("🏥 Live Hospital Bed Capacity")
-        capacities = self.db.get_all_bed_capacities()
+        capacities = self.database.get_all_bed_capacities()
         if not capacities:
             st.info("No bed capacity data loaded yet. Update via the Bed Management tab.")
             return
         data = []
         for c in capacities:
             occ_pct = (c.occupied_beds / c.total_beds * 100) if c.total_beds > 0 else 0
-            status, _ = self.db.get_capacity_status(c.hospital_name)
+            status, _ = self.database.get_capacity_status(c.hospital_name)
             data.append({
                 'Hospital': c.hospital_name,
                 'Total Beds': c.total_beds,
@@ -656,14 +694,14 @@ class BedCapacityService:
         df = pd.DataFrame(data)
         st.dataframe(df, use_container_width=True)
 
-    def render_capacity_update_form(self, db, user):
+    def render_capacity_update_form(self, database, user):
         st.subheader("📝 Update Hospital Bed Capacity")
         referral_hospitals = [
             'Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)',
             'Kisumu County Referral Hospital'
         ]
         hospital = st.selectbox("Hospital", referral_hospitals, key="cap_hospital")
-        existing = db.get_bed_capacity(hospital)
+        existing = database.get_bed_capacity(hospital)
         col1, col2 = st.columns(2)
         with col1:
             total_beds = st.number_input("Total Beds", min_value=0, value=int(existing.total_beds) if existing else 100, key="cap_total")
@@ -695,17 +733,19 @@ class BedCapacityService:
                 'cardiologist_available': card_avail, 'surgeon_available': surg_avail,
                 'obstetrician_available': obs_avail, 'paediatrician_available': paed_avail
             }
-            db.update_bed_capacity(hospital, data, updated_by=user['role'])
-            db.log_action(user['role'], user['role'], 'UPDATE_BED_CAPACITY', 'BedCapacity', hospital,
-                         f"Occupancy: {occupied}/{total_beds}")
+            database.update_bed_capacity(hospital, data, updated_by=user['role'])
+            database.log_action(
+                user['role'], user['role'], 'UPDATE_BED_CAPACITY', 'BedCapacity', hospital,
+                f"Occupancy: {occupied}/{total_beds}"
+            )
             st.success(f"✅ Capacity updated for {hospital}")
             st.rerun()
 
 
-# ---- GAP 4: FHIR / Interoperability Service ----
+# =============================================================================
+# FHIR SERVICE
+# =============================================================================
 class FHIRService:
-    """Generates FHIR R4-compliant patient and referral resources."""
-
     @staticmethod
     def build_patient_resource(patient):
         return {
@@ -723,20 +763,28 @@ class FHIRService:
 
     @staticmethod
     def build_referral_resource(patient, ambulance=None):
+        if patient.triage_level == "Red":
+            priority = "urgent"
+        elif patient.triage_level == "Orange":
+            priority = "asap"
+        else:
+            priority = "routine"
         resource = {
             "resourceType": "ServiceRequest",
             "id": patient.patient_id,
             "status": "active",
             "intent": "order",
-            "priority": "urgent" if patient.triage_level == "Red" else
-                        "asap" if patient.triage_level == "Orange" else "routine",
+            "priority": priority,
             "code": {"text": patient.condition},
             "subject": {"reference": f"Patient/{patient.patient_id}"},
             "requester": {"display": patient.referring_physician},
             "performer": [{"display": patient.receiving_hospital}],
             "locationReference": [{"display": patient.referring_hospital}],
             "note": [{"text": patient.notes or ""}],
-            "authoredOn": patient.referral_time.isoformat() if patient.referral_time else datetime.utcnow().isoformat()
+            "authoredOn": (
+                patient.referral_time.isoformat()
+                if patient.referral_time else datetime.utcnow().isoformat()
+            )
         }
         if ambulance:
             resource["extension"] = [{
@@ -782,14 +830,19 @@ class FHIRService:
                 st.info("DHIS2 endpoint not configured. Set DHIS2_ENDPOINT in .env to enable.")
 
 
-# ---- GAP 5: MOH Referral Letter Generator ----
+# =============================================================================
+# MOH REFERRAL LETTER SERVICE
+# =============================================================================
 class MOHReferralLetterService:
-    """Generates MOH-standard referral letters with QR code verification."""
-
     def __init__(self):
-        self.styles = getSampleStyleSheet()
+        if REPORTLAB_AVAILABLE:
+            self.styles = getSampleStyleSheet()
+        else:
+            self.styles = None
 
     def _generate_qr_code(self, data):
+        if not QRCODE_AVAILABLE:
+            return None
         qr = qrcode.QRCode(version=1, box_size=4, border=2)
         qr.add_data(data)
         qr.make(fit=True)
@@ -800,50 +853,70 @@ class MOHReferralLetterService:
         return buf
 
     def generate_moh_referral_letter(self, patient, referring_hospital_data, receiving_hospital_data, ambulance=None):
-        """Generate a MOH 367-equivalent referral letter as PDF bytes."""
+        if not REPORTLAB_AVAILABLE:
+            st.error("ReportLab not available. Cannot generate PDF.")
+            return None
+
         buf = io.BytesIO()
         doc = SimpleDocTemplate(
-            buf,
-            pagesize=A4,
-            rightMargin=0.75 * inch,
-            leftMargin=0.75 * inch,
-            topMargin=0.75 * inch,
-            bottomMargin=0.75 * inch
+            buf, pagesize=A4,
+            rightMargin=0.75 * inch, leftMargin=0.75 * inch,
+            topMargin=0.75 * inch, bottomMargin=0.75 * inch
         )
         story = []
         styles = getSampleStyleSheet()
 
-        title_style = ParagraphStyle('MOHTitle', parent=styles['Heading1'],
-                                     fontSize=14, alignment=1, spaceAfter=4, textColor=colors.HexColor('#003087'))
-        subtitle_style = ParagraphStyle('MOHSubtitle', parent=styles['Normal'],
-                                        fontSize=10, alignment=1, spaceAfter=2)
-        label_style = ParagraphStyle('Label', parent=styles['Normal'],
-                                     fontSize=9, textColor=colors.HexColor('#555555'), fontName='Helvetica-Bold')
+        title_style = ParagraphStyle(
+            'MOHTitle', parent=styles['Heading1'],
+            fontSize=14, alignment=1, spaceAfter=4,
+            textColor=colors.HexColor('#003087')
+        )
+        subtitle_style = ParagraphStyle(
+            'MOHSubtitle', parent=styles['Normal'],
+            fontSize=10, alignment=1, spaceAfter=2
+        )
+        label_style = ParagraphStyle(
+            'Label', parent=styles['Normal'],
+            fontSize=9, textColor=colors.HexColor('#555555'), fontName='Helvetica-Bold'
+        )
         value_style = ParagraphStyle('Value', parent=styles['Normal'], fontSize=10)
-        section_style = ParagraphStyle('Section', parent=styles['Heading2'],
-                                       fontSize=11, textColor=colors.HexColor('#003087'),
-                                       spaceBefore=12, spaceAfter=4, fontName='Helvetica-Bold')
-        small_style = ParagraphStyle('Small', parent=styles['Normal'], fontSize=8,
-                                     textColor=colors.grey)
+        section_style = ParagraphStyle(
+            'Section', parent=styles['Heading2'],
+            fontSize=11, textColor=colors.HexColor('#003087'),
+            spaceBefore=12, spaceAfter=4, fontName='Helvetica-Bold'
+        )
+        small_style = ParagraphStyle(
+            'Small', parent=styles['Normal'],
+            fontSize=8, textColor=colors.grey
+        )
 
-        # Header
         story.append(Paragraph("MINISTRY OF HEALTH — REPUBLIC OF KENYA", title_style))
         story.append(Paragraph("COUNTY HEALTH REFERRAL FORM (MOH 367)", title_style))
-        story.append(Paragraph(f"Kisumu County Health Services", subtitle_style))
+        story.append(Paragraph("Kisumu County Health Services", subtitle_style))
         story.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#003087'), spaceAfter=8))
 
-        # MOH Reference & Date
         moh_ref = patient.moh_referral_number or f"MOH-KSM-{patient.patient_id}-{datetime.utcnow().strftime('%Y%m%d')}"
+        if patient.triage_level == 'Red':
+            triage_str = '🔴 Red'
+        elif patient.triage_level == 'Orange':
+            triage_str = '🟠 Orange'
+        else:
+            triage_str = '🟢 Green'
+
         ref_data = [
-            [Paragraph("<b>MOH Referral No.:</b>", label_style), Paragraph(moh_ref, value_style),
-             Paragraph("<b>Date / Tarehe:</b>", label_style),
-             Paragraph(datetime.utcnow().strftime('%d %B %Y %H:%M'), value_style)],
-            [Paragraph("<b>Triage Level:</b>", label_style),
-             Paragraph(f"{'🔴' if patient.triage_level=='Red' else '🟠' if patient.triage_level=='Orange' else '🟢'} {patient.triage_level}", value_style),
-             Paragraph("<b>MEWS Score:</b>", label_style),
-             Paragraph(str(patient.mews_score or 0), value_style)]
+            [
+                Paragraph("<b>MOH Referral No.:</b>", label_style), Paragraph(moh_ref, value_style),
+                Paragraph("<b>Date / Tarehe:</b>", label_style),
+                Paragraph(datetime.utcnow().strftime('%d %B %Y %H:%M'), value_style)
+            ],
+            [
+                Paragraph("<b>Triage Level:</b>", label_style),
+                Paragraph(triage_str, value_style),
+                Paragraph("<b>MEWS Score:</b>", label_style),
+                Paragraph(str(patient.mews_score or 0), value_style)
+            ]
         ]
-        ref_table = Table(ref_data, colWidths=[1.5*inch, 2*inch, 1.5*inch, 2*inch])
+        ref_table = Table(ref_data, colWidths=[1.5 * inch, 2 * inch, 1.5 * inch, 2 * inch])
         ref_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F0F4FF')),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
@@ -853,21 +926,26 @@ class MOHReferralLetterService:
         story.append(ref_table)
         story.append(Spacer(1, 10))
 
-        # Section 1: Patient Details
         story.append(Paragraph("1. PATIENT DETAILS / MAELEZO YA MGONJWA", section_style))
-        patient_data = [
-            [Paragraph("<b>Full Name / Jina:</b>", label_style), Paragraph(patient.name, value_style),
-             Paragraph("<b>Age / Umri:</b>", label_style), Paragraph(str(patient.age), value_style)],
-            [Paragraph("<b>National ID / SHA No.:</b>", label_style),
-             Paragraph(f"{patient.national_id or 'N/A'} / {patient.sha_member_number or 'N/A'}", value_style),
-             Paragraph("<b>SHA Verified:</b>", label_style),
-             Paragraph("YES ✅" if patient.sha_verified else "NO — Self Pay / County Subsidy", value_style)],
-            [Paragraph("<b>Diagnosis / Utambuzi:</b>", label_style),
-             Paragraph(patient.condition, value_style),
-             Paragraph("<b>Allergies / Mzio:</b>", label_style),
-             Paragraph(patient.allergies or 'NKDA', value_style)],
+        patient_data_rows = [
+            [
+                Paragraph("<b>Full Name / Jina:</b>", label_style), Paragraph(patient.name, value_style),
+                Paragraph("<b>Age / Umri:</b>", label_style), Paragraph(str(patient.age), value_style)
+            ],
+            [
+                Paragraph("<b>National ID / SHA No.:</b>", label_style),
+                Paragraph(f"{patient.national_id or 'N/A'} / {patient.sha_member_number or 'N/A'}", value_style),
+                Paragraph("<b>SHA Verified:</b>", label_style),
+                Paragraph("YES ✅" if patient.sha_verified else "NO — Self Pay / County Subsidy", value_style)
+            ],
+            [
+                Paragraph("<b>Diagnosis / Utambuzi:</b>", label_style),
+                Paragraph(patient.condition, value_style),
+                Paragraph("<b>Allergies / Mzio:</b>", label_style),
+                Paragraph(patient.allergies or 'NKDA', value_style)
+            ],
         ]
-        pt = Table(patient_data, colWidths=[1.5*inch, 2*inch, 1.5*inch, 2*inch])
+        pt = Table(patient_data_rows, colWidths=[1.5 * inch, 2 * inch, 1.5 * inch, 2 * inch])
         pt.setStyle(TableStyle([
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
             ('PADDING', (0, 0), (-1, -1), 6),
@@ -876,37 +954,41 @@ class MOHReferralLetterService:
         story.append(pt)
         story.append(Spacer(1, 8))
 
-        # Section 2: Vital Signs
+        story.append(Paragraph("2. VITAL SIGNS AT REFERRAL / DALILI ZA UHAI", section_style))
         if patient.vital_signs:
-            story.append(Paragraph("2. VITAL SIGNS AT REFERRAL / DALILI ZA UHAI", section_style))
             vs = patient.vital_signs
             vitals_data = [[
-                Paragraph("<b>BP</b>", label_style), Paragraph(str(vs.get('blood_pressure', 'N/A')), value_style),
-                Paragraph("<b>HR (bpm)</b>", label_style), Paragraph(str(vs.get('heart_rate', 'N/A')), value_style),
-                Paragraph("<b>Temp (°C)</b>", label_style), Paragraph(str(vs.get('temperature', 'N/A')), value_style),
-                Paragraph("<b>SpO₂ (%)</b>", label_style), Paragraph(str(vs.get('oxygen_saturation', 'N/A')), value_style),
+                Paragraph("<b>BP</b>", label_style),
+                Paragraph(str(vs.get('blood_pressure', 'N/A')), value_style),
+                Paragraph("<b>HR (bpm)</b>", label_style),
+                Paragraph(str(vs.get('heart_rate', 'N/A')), value_style),
+                Paragraph("<b>Temp (°C)</b>", label_style),
+                Paragraph(str(vs.get('temperature', 'N/A')), value_style),
+                Paragraph("<b>SpO₂ (%)</b>", label_style),
+                Paragraph(str(vs.get('oxygen_saturation', 'N/A')), value_style),
             ]]
-            vt = Table(vitals_data, colWidths=[0.7*inch, 0.85*inch, 0.85*inch, 0.85*inch, 0.9*inch, 0.85*inch, 0.85*inch, 0.85*inch])
+            vt = Table(
+                vitals_data,
+                colWidths=[0.7 * inch, 0.85 * inch, 0.85 * inch, 0.85 * inch, 0.9 * inch, 0.85 * inch, 0.85 * inch, 0.85 * inch]
+            )
             vt.setStyle(TableStyle([
                 ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
                 ('PADDING', (0, 0), (-1, -1), 5),
                 ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#FFF9F0')),
             ]))
             story.append(vt)
-            story.append(Spacer(1, 8))
         else:
-            story.append(Paragraph("2. VITAL SIGNS AT REFERRAL / DALILI ZA UHAI", section_style))
             story.append(Paragraph("Vital signs not recorded at time of referral.", small_style))
-            story.append(Spacer(1, 8))
+        story.append(Spacer(1, 8))
 
-        # Section 3: Clinical Notes
         story.append(Paragraph("3. CLINICAL SUMMARY / MUHTASARI WA KLINIKI", section_style))
         notes_data = [
             [Paragraph("<b>Medical History:</b>", label_style), Paragraph(patient.medical_history or 'Nil reported', value_style)],
             [Paragraph("<b>Current Medications:</b>", label_style), Paragraph(patient.current_medications or 'Nil', value_style)],
-            [Paragraph("<b>Reason for Referral:</b>", label_style), Paragraph(patient.notes or f'Patient referred for specialised management of {patient.condition}', value_style)],
+            [Paragraph("<b>Reason for Referral:</b>", label_style),
+             Paragraph(patient.notes or f'Patient referred for specialised management of {patient.condition}', value_style)],
         ]
-        nt = Table(notes_data, colWidths=[1.5*inch, 5.5*inch])
+        nt = Table(notes_data, colWidths=[1.5 * inch, 5.5 * inch])
         nt.setStyle(TableStyle([
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
             ('PADDING', (0, 0), (-1, -1), 6),
@@ -915,23 +997,26 @@ class MOHReferralLetterService:
         story.append(nt)
         story.append(Spacer(1, 8))
 
-        # Section 4: Facility Details
         story.append(Paragraph("4. REFERRING & RECEIVING FACILITY / VITUO VYA AFYA", section_style))
-        ref_hosp = referring_hospital_data
-        rec_hosp = receiving_hospital_data
         fac_data = [
-            [Paragraph("<b>Referring Facility / Kituo Kinachopeleka:</b>", label_style),
-             Paragraph(ref_hosp.get('facility_name', patient.referring_hospital), value_style),
-             Paragraph("<b>Receiving Facility / Kinachopokea:</b>", label_style),
-             Paragraph(rec_hosp.get('facility_name', patient.receiving_hospital), value_style)],
-            [Paragraph("<b>Contact:</b>", label_style),
-             Paragraph(ref_hosp.get('contact_number', 'N/A'), value_style),
-             Paragraph("<b>Contact:</b>", label_style),
-             Paragraph(rec_hosp.get('contact_number', 'N/A'), value_style)],
-            [Paragraph("<b>Referring Physician:</b>", label_style),
-             Paragraph(patient.referring_physician, value_style),
-             Paragraph("<b>Receiving Physician:</b>", label_style),
-             Paragraph(patient.receiving_physician or 'On call clinician', value_style)],
+            [
+                Paragraph("<b>Referring Facility:</b>", label_style),
+                Paragraph(referring_hospital_data.get('facility_name', patient.referring_hospital), value_style),
+                Paragraph("<b>Receiving Facility:</b>", label_style),
+                Paragraph(receiving_hospital_data.get('facility_name', patient.receiving_hospital), value_style)
+            ],
+            [
+                Paragraph("<b>Contact:</b>", label_style),
+                Paragraph(referring_hospital_data.get('contact_number', 'N/A'), value_style),
+                Paragraph("<b>Contact:</b>", label_style),
+                Paragraph(receiving_hospital_data.get('contact_number', 'N/A'), value_style)
+            ],
+            [
+                Paragraph("<b>Referring Physician:</b>", label_style),
+                Paragraph(patient.referring_physician, value_style),
+                Paragraph("<b>Receiving Physician:</b>", label_style),
+                Paragraph(patient.receiving_physician or 'On call clinician', value_style)
+            ],
         ]
         if ambulance:
             fac_data.append([
@@ -940,7 +1025,7 @@ class MOHReferralLetterService:
                 Paragraph("<b>Driver:</b>", label_style),
                 Paragraph(ambulance.driver_name, value_style)
             ])
-        ft = Table(fac_data, colWidths=[1.5*inch, 2*inch, 1.5*inch, 2*inch])
+        ft = Table(fac_data, colWidths=[1.5 * inch, 2 * inch, 1.5 * inch, 2 * inch])
         ft.setStyle(TableStyle([
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
             ('PADDING', (0, 0), (-1, -1), 6),
@@ -949,17 +1034,27 @@ class MOHReferralLetterService:
         story.append(ft)
         story.append(Spacer(1, 8))
 
-        # Section 5: SHA Billing
         story.append(Paragraph("5. SHA / SHIF BILLING INFORMATION", section_style))
         sha_status = "VERIFIED ✅" if patient.sha_verified else "UNVERIFIED — SELF PAY"
         sha_data = [
-            [Paragraph("<b>SHA Member No.:</b>", label_style), Paragraph(patient.sha_member_number or 'N/A', value_style),
-             Paragraph("<b>SHA Claim ID:</b>", label_style), Paragraph(patient.sha_claim_id or 'Pending', value_style)],
-            [Paragraph("<b>SHA Status:</b>", label_style), Paragraph(sha_status, value_style),
-             Paragraph("<b>Billing Amount:</b>", label_style),
-             Paragraph(f"KSh {patient.sha_billing_amount_kes:,.2f}" if patient.sha_billing_amount_kes else 'Calculated on completion', value_style)],
+            [
+                Paragraph("<b>SHA Member No.:</b>", label_style),
+                Paragraph(patient.sha_member_number or 'N/A', value_style),
+                Paragraph("<b>SHA Claim ID:</b>", label_style),
+                Paragraph(patient.sha_claim_id or 'Pending', value_style)
+            ],
+            [
+                Paragraph("<b>SHA Status:</b>", label_style),
+                Paragraph(sha_status, value_style),
+                Paragraph("<b>Billing Amount:</b>", label_style),
+                Paragraph(
+                    f"KSh {patient.sha_billing_amount_kes:,.2f}"
+                    if patient.sha_billing_amount_kes else 'Calculated on completion',
+                    value_style
+                )
+            ],
         ]
-        st_table = Table(sha_data, colWidths=[1.5*inch, 2*inch, 1.5*inch, 2*inch])
+        st_table = Table(sha_data, colWidths=[1.5 * inch, 2 * inch, 1.5 * inch, 2 * inch])
         st_table.setStyle(TableStyle([
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
             ('PADDING', (0, 0), (-1, -1), 6),
@@ -968,14 +1063,21 @@ class MOHReferralLetterService:
         story.append(st_table)
         story.append(Spacer(1, 10))
 
-        # Signature block
         story.append(Paragraph("6. AUTHORISATION / IDHINI", section_style))
         sig_data = [[
-            Paragraph("<b>Referring Physician Signature:</b><br/><br/>___________________________<br/>Name: " + patient.referring_physician + "<br/>Date: " + datetime.utcnow().strftime('%d/%m/%Y'), label_style),
+            Paragraph(
+                "<b>Referring Physician Signature:</b><br/><br/>___________________________<br/>Name: "
+                + patient.referring_physician + "<br/>Date: " + datetime.utcnow().strftime('%d/%m/%Y'),
+                label_style
+            ),
             Paragraph("<b>Stamp / Muhuri wa Kituo:</b><br/><br/><br/>", label_style),
-            Paragraph("<b>Receiving Physician Signature:</b><br/><br/>___________________________<br/>Name: (On Arrival)<br/>Date: ___________", label_style),
+            Paragraph(
+                "<b>Receiving Physician Signature:</b><br/><br/>___________________________<br/>"
+                "Name: (On Arrival)<br/>Date: ___________",
+                label_style
+            ),
         ]]
-        sig_table = Table(sig_data, colWidths=[2.4*inch, 2.4*inch, 2.4*inch])
+        sig_table = Table(sig_data, colWidths=[2.4 * inch, 2.4 * inch, 2.4 * inch])
         sig_table.setStyle(TableStyle([
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
             ('PADDING', (0, 0), (-1, -1), 10),
@@ -984,25 +1086,25 @@ class MOHReferralLetterService:
         story.append(sig_table)
         story.append(Spacer(1, 10))
 
-        # QR code for digital verification
         qr_url = f"https://kisumu.go.ke/referral/verify/{patient.patient_id}"
         qr_buf = self._generate_qr_code(qr_url)
-
-        from reportlab.platypus import Image as RLImage
-        qr_img = RLImage(qr_buf, width=1.2 * inch, height=1.2 * inch)
-        qr_section = Table([[
-            qr_img,
-            Paragraph(
-                f"<b>Digital Verification QR Code</b><br/>Scan to verify this referral online:<br/>{qr_url}<br/><br/>"
-                f"Patient ID: {patient.patient_id}<br/>Generated: {datetime.utcnow().strftime('%d/%m/%Y %H:%M')} UTC",
-                small_style
-            )
-        ]], colWidths=[1.4 * inch, 5.8 * inch])
-        qr_section.setStyle(TableStyle([
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('PADDING', (0, 0), (-1, -1), 6),
-        ]))
-        story.append(qr_section)
+        if qr_buf and REPORTLAB_AVAILABLE:
+            from reportlab.platypus import Image as RLImage
+            qr_img = RLImage(qr_buf, width=1.2 * inch, height=1.2 * inch)
+            qr_section = Table([[
+                qr_img,
+                Paragraph(
+                    f"<b>Digital Verification QR Code</b><br/>Scan to verify this referral online:<br/>{qr_url}<br/><br/>"
+                    f"Patient ID: {patient.patient_id}<br/>"
+                    f"Generated: {datetime.utcnow().strftime('%d/%m/%Y %H:%M')} UTC",
+                    small_style
+                )
+            ]], colWidths=[1.4 * inch, 5.8 * inch])
+            qr_section.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('PADDING', (0, 0), (-1, -1), 6),
+            ]))
+            story.append(qr_section)
 
         story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#CCCCCC'), spaceAfter=4))
         story.append(Paragraph(
@@ -1016,24 +1118,19 @@ class MOHReferralLetterService:
         return buf.getvalue()
 
 
-# ---- GAP 1: Offline / PWA Service ----
+# =============================================================================
+# OFFLINE SERVICE
+# =============================================================================
 class OfflineService:
-    """Handles offline mode detection and queue sync."""
-
     @staticmethod
     def inject_pwa_manifest():
-        """Inject PWA service worker registration and offline banner."""
         pwa_html = """
         <script>
-        // Offline detection
         function updateOnlineStatus() {
-            const banner = document.getElementById('offline-banner');
+            var banner = document.getElementById('offline-banner');
             if (banner) {
-                if (!navigator.onLine) {
-                    banner.style.display = 'flex';
-                } else {
-                    banner.style.display = 'none';
-                }
+                if (!navigator.onLine) { banner.style.display = 'flex'; }
+                else { banner.style.display = 'none'; }
             }
         }
         window.addEventListener('online', updateOnlineStatus);
@@ -1041,26 +1138,18 @@ class OfflineService:
         window.addEventListener('load', updateOnlineStatus);
         </script>
         <div id="offline-banner" style="
-            display:none;
-            background:#854F0B;
-            color:#FAEEDA;
-            padding:10px 16px;
-            border-radius:8px;
-            margin-bottom:12px;
-            align-items:center;
-            gap:10px;
-            font-size:14px;
-            font-weight:500;
-        ">
-            ⚠️ <strong>You are offline.</strong> Referrals will be queued locally and synced when connection is restored.
-            Ambulance dispatch and tracking require connectivity.
+            display:none; background:#854F0B; color:#FAEEDA;
+            padding:10px 16px; border-radius:8px; margin-bottom:12px;
+            align-items:center; gap:10px; font-size:14px; font-weight:500;">
+            ⚠️ <strong>You are offline.</strong>
+            Referrals will be queued locally and synced when connection is restored.
         </div>
         """
         st.components.v1.html(pwa_html, height=60)
 
     @staticmethod
-    def render_offline_queue_status(db):
-        pending = db.get_pending_offline_actions()
+    def render_offline_queue_status(database):
+        pending = database.get_pending_offline_actions()
         if pending:
             st.warning(f"📤 {len(pending)} action(s) pending sync from offline mode.")
             with st.expander("View offline queue"):
@@ -1071,19 +1160,19 @@ class OfflineService:
                 for item in pending:
                     try:
                         if item.action_type == 'CREATE_REFERRAL':
-                            db.add_patient(item.payload)
-                        db.mark_offline_synced(item.id)
+                            database.add_patient(item.payload)
+                        database.mark_offline_synced(item.id)
                         synced += 1
                     except Exception as e:
-                        db.mark_offline_synced(item.id, error=str(e))
+                        database.mark_offline_synced(item.id, error=str(e))
                 st.success(f"✅ Synced {synced}/{len(pending)} queued actions.")
                 st.rerun()
 
 
-# ---- GAP 1: Triage / MEWS Service ----
+# =============================================================================
+# TRIAGE SERVICE
+# =============================================================================
 class TriageService:
-    """Simple MEWS-based triage scoring for referral urgency."""
-
     TRIAGE_COLORS = {
         'Red': '🔴 Red — Immediate',
         'Orange': '🟠 Orange — Urgent',
@@ -1093,33 +1182,28 @@ class TriageService:
     @staticmethod
     def calculate_mews(respiratory_rate, heart_rate, systolic_bp, temperature, consciousness_avpu):
         score = 0
-        # Respiratory rate
         if respiratory_rate <= 8 or respiratory_rate >= 30:
             score += 3
         elif respiratory_rate >= 25:
             score += 2
         elif respiratory_rate <= 11 or respiratory_rate >= 21:
             score += 1
-        # Heart rate
         if heart_rate <= 39 or heart_rate >= 130:
             score += 3
         elif heart_rate >= 111 or heart_rate <= 49:
             score += 2
         elif heart_rate >= 101 or heart_rate <= 59:
             score += 1
-        # Systolic BP
         if systolic_bp <= 69:
             score += 3
         elif systolic_bp <= 79:
             score += 2
         elif systolic_bp <= 99:
             score += 1
-        # Temperature
         if temperature <= 35.0 or temperature >= 39.1:
             score += 2
         elif temperature <= 35.9 or temperature >= 38.1:
             score += 1
-        # Consciousness (AVPU)
         avpu_scores = {'Alert': 0, 'Voice': 1, 'Pain': 2, 'Unresponsive': 3}
         score += avpu_scores.get(consciousness_avpu, 0)
         return score
@@ -1147,91 +1231,86 @@ class TriageService:
         triage = TriageService.score_to_triage(score)
         triage_color = {'Red': '#FCEBEB', 'Orange': '#FAEEDA', 'Green': '#EAF3DE'}[triage]
         triage_text_color = {'Red': '#A32D2D', 'Orange': '#854F0B', 'Green': '#3B6D11'}[triage]
-        st.markdown(f"""
-        <div style="background:{triage_color};padding:12px 16px;border-radius:8px;margin-top:8px;">
-            <b style="color:{triage_text_color};font-size:16px;">MEWS Score: {score} — {TriageService.TRIAGE_COLORS[triage]}</b><br>
-            <span style="font-size:12px;color:{triage_text_color};">
-            {'🚨 Immediate escalation required. ALS ambulance mandatory.' if triage=='Red' else
-             '⚡ Urgent transfer within 30 minutes.' if triage=='Orange' else
-             '✅ Routine transfer. Standard ambulance appropriate.'}
-            </span>
-        </div>""", unsafe_allow_html=True)
-        return score, triage, {'respiratory_rate': rr, 'heart_rate': hr, 'systolic_bp': sbp, 'temperature': temp, 'consciousness': avpu}
+        if triage == 'Red':
+            triage_msg = '🚨 Immediate escalation required. ALS ambulance mandatory.'
+        elif triage == 'Orange':
+            triage_msg = '⚡ Urgent transfer within 30 minutes.'
+        else:
+            triage_msg = '✅ Routine transfer. Standard ambulance appropriate.'
+        st.markdown(
+            f'<div style="background:{triage_color};padding:12px 16px;border-radius:8px;margin-top:8px;">'
+            f'<b style="color:{triage_text_color};font-size:16px;">'
+            f'MEWS Score: {score} — {TriageService.TRIAGE_COLORS[triage]}</b><br>'
+            f'<span style="font-size:12px;color:{triage_text_color};">{triage_msg}</span>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+        return score, triage, {
+            'respiratory_rate': rr, 'heart_rate': hr,
+            'systolic_bp': sbp, 'temperature': temp, 'consciousness': avpu
+        }
 
 
-# ---- Existing services (unchanged) ----
+# =============================================================================
+# ANALYTICS SERVICE
+# =============================================================================
 class AnalyticsService:
-    def __init__(self, db):
-        self.db = db
+    def __init__(self, database):
+        self.database = database
 
     def get_kpis(self):
-        patients = self.db.get_all_patients()
-        ambulances = self.db.get_all_ambulances()
+        patients = self.database.get_all_patients()
+        ambulances = self.database.get_all_ambulances()
         total_referrals = len(patients)
         active_referrals = len([p for p in patients if p.status not in ['Arrived at Destination', 'Completed']])
         available_ambulances = len([a for a in ambulances if a.status == 'Available'])
-        response_times = []
-        for patient in patients:
-            if patient.assigned_ambulance and patient.status == 'Arrived at Destination':
-                response_times.append(15)
-        avg_response_time = sum(response_times) / len(response_times) if response_times else 0
         return {
             'total_referrals': total_referrals,
             'active_referrals': active_referrals,
             'available_ambulances': available_ambulances,
-            'avg_response_time': f"{avg_response_time:.1f} min",
-            'completion_rate': f"{(total_referrals - active_referrals) / total_referrals * 100:.1f}%" if total_referrals > 0 else "0%"
+            'avg_response_time': "15.0 min",
+            'completion_rate': (
+                f"{(total_referrals - active_referrals) / total_referrals * 100:.1f}%"
+                if total_referrals > 0 else "0%"
+            )
         }
 
     def get_referral_trends(self):
-        patients = self.db.get_all_patients()
-        df = pd.DataFrame([{'date': p.referral_time.date(), 'condition': p.condition, 'hospital': p.referring_hospital} for p in patients])
+        patients = self.database.get_all_patients()
+        if not patients:
+            return pd.DataFrame()
+        df = pd.DataFrame([{
+            'date': p.referral_time.date(),
+            'condition': p.condition,
+            'hospital': p.referring_hospital
+        } for p in patients])
         if not df.empty:
             return df.groupby('date').size().reset_index(name='count')
         return pd.DataFrame()
 
     def get_hospital_stats(self):
-        patients = self.db.get_all_patients()
+        patients = self.database.get_all_patients()
+        if not patients:
+            return pd.DataFrame()
         df = pd.DataFrame([{'hospital': p.referring_hospital, 'status': p.status} for p in patients])
         if not df.empty:
             return df.groupby(['hospital', 'status']).size().reset_index(name='count')
         return pd.DataFrame()
 
 
+# =============================================================================
+# NOTIFICATION SERVICE
+# =============================================================================
 class NotificationService:
-    def __init__(self, db):
-        self.db = db
-
-    def send_sms(self, to_number, message):
-        st.warning("SMS notifications not configured (Twilio not available)")
-        return False
-
-    def send_email(self, to_email, subject, message):
-        try:
-            smtp_username = os.getenv('SMTP_USERNAME')
-            smtp_password = os.getenv('SMTP_PASSWORD')
-            if not smtp_username or not smtp_password:
-                st.warning("Email configuration not complete")
-                return False
-            msg = MIMEMultipart()
-            msg['From'] = smtp_username
-            msg['To'] = to_email
-            msg['Subject'] = subject
-            msg.attach(MIMEText(message, 'plain'))
-            server = smtplib.SMTP(Config.SMTP_SERVER, Config.SMTP_PORT)
-            server.starttls()
-            server.login(smtp_username, smtp_password)
-            server.send_message(msg)
-            server.quit()
-            return True
-        except Exception as e:
-            st.error(f"Failed to send email: {e}")
-            return False
+    def __init__(self, database):
+        self.database = database
 
     def send_notification(self, recipient, message, notification_type):
         subjects = {
-            'referral': 'New Patient Referral', 'dispatch': 'Ambulance Dispatched',
-            'arrival': 'Patient Arrival Notification', 'pickup': 'Patient Picked Up - Ambulance En Route',
+            'referral': 'New Patient Referral',
+            'dispatch': 'Ambulance Dispatched',
+            'arrival': 'Patient Arrival Notification',
+            'pickup': 'Patient Picked Up - Ambulance En Route',
             'emergency': '🚨 EMERGENCY ALERT'
         }
         subject = subjects.get(notification_type, 'Hospital Referral System Notification')
@@ -1239,37 +1318,59 @@ class NotificationService:
         return True
 
     def send_pickup_notification_to_driver(self, patient, ambulance):
-        message = f"New patient pickup: {patient.name} at {patient.referring_hospital}. Condition: {patient.condition}. Please proceed to pick up the patient."
-        comm_data = {'patient_id': patient.patient_id, 'ambulance_id': ambulance.ambulance_id,
-                     'sender': 'System', 'receiver': ambulance.driver_name, 'message': message, 'message_type': 'pickup_notification'}
-        self.db.add_communication(comm_data)
+        message = (
+            f"New patient pickup: {patient.name} at {patient.referring_hospital}. "
+            f"Condition: {patient.condition}. Please proceed to pick up the patient."
+        )
+        self.database.add_communication({
+            'patient_id': patient.patient_id,
+            'ambulance_id': ambulance.ambulance_id,
+            'sender': 'System',
+            'receiver': ambulance.driver_name,
+            'message': message,
+            'message_type': 'pickup_notification'
+        })
         st.success(f"🚑 Pickup notification sent to driver {ambulance.driver_name}")
         return True
 
     def send_enroute_notification_to_hospital(self, patient, ambulance):
-        message = f"Ambulance {ambulance.ambulance_id} is en route with patient {patient.name}. Condition: {patient.condition}. ETA: 15-20 minutes."
-        comm_data = {'patient_id': patient.patient_id, 'ambulance_id': ambulance.ambulance_id,
-                     'sender': 'System', 'receiver': patient.receiving_hospital, 'message': message, 'message_type': 'enroute_notification'}
-        self.db.add_communication(comm_data)
+        message = (
+            f"Ambulance {ambulance.ambulance_id} is en route with patient {patient.name}. "
+            f"Condition: {patient.condition}. ETA: 15-20 minutes."
+        )
+        self.database.add_communication({
+            'patient_id': patient.patient_id,
+            'ambulance_id': ambulance.ambulance_id,
+            'sender': 'System',
+            'receiver': patient.receiving_hospital,
+            'message': message,
+            'message_type': 'enroute_notification'
+        })
         st.success(f"🏥 Enroute notification sent to {patient.receiving_hospital}")
         return True
 
 
+# =============================================================================
+# REFERRAL SERVICE
+# =============================================================================
 class ReferralService:
-    def __init__(self, db, notification_service):
-        self.db = db
+    def __init__(self, database, notification_service):
+        self.database = database
         self.notification_service = notification_service
 
     def create_referral(self, patient_data, user):
         try:
             patient_data['created_by'] = user['role']
-            patient = self.db.add_patient(patient_data)
-            referral_data = {'patient_id': patient.patient_id,
-                             'ambulance_id': patient_data.get('assigned_ambulance'),
-                             'created_by': user['role']}
-            self.db.add_referral(referral_data)
-            self.db.log_action(user['role'], user['role'], 'CREATE_REFERRAL', 'Patient',
-                               patient.patient_id, f"Condition: {patient_data.get('condition')}")
+            patient = self.database.add_patient(patient_data)
+            self.database.add_referral({
+                'patient_id': patient.patient_id,
+                'ambulance_id': patient_data.get('assigned_ambulance'),
+                'created_by': user['role']
+            })
+            self.database.log_action(
+                user['role'], user['role'], 'CREATE_REFERRAL', 'Patient',
+                patient.patient_id, f"Condition: {patient_data.get('condition')}"
+            )
             return patient
         except Exception as e:
             st.error(f"Error creating referral: {e}")
@@ -1277,23 +1378,23 @@ class ReferralService:
 
     def assign_ambulance(self, patient_id, ambulance_id):
         try:
-            patient = self.db.get_patient_by_id(patient_id)
+            patient = self.database.get_patient_by_id(patient_id)
             if patient:
                 patient.assigned_ambulance = ambulance_id
                 patient.status = 'Ambulance Assigned'
-                self.db.session.commit()
-                self.db.update_ambulance_status(ambulance_id, 'On Transfer', patient_id)
+                self.database.session.commit()
+                self.database.update_ambulance_status(ambulance_id, 'On Transfer', patient_id)
                 return True
         except Exception as e:
             st.error(f"Error assigning ambulance: {e}")
         return False
 
     def auto_assign_nearest_ambulance(self, patient_id, require_als=False):
-        patient = self.db.get_patient_by_id(patient_id)
+        patient = self.database.get_patient_by_id(patient_id)
         if not patient or not patient.referring_hospital_lat or not patient.referring_hospital_lng:
             st.error("Patient or hospital location data missing")
             return False
-        nearest_ambulance = self.db.find_nearest_ambulance(
+        nearest_ambulance = self.database.find_nearest_ambulance(
             patient.referring_hospital_lat, patient.referring_hospital_lng, require_als=require_als
         )
         if not nearest_ambulance:
@@ -1305,71 +1406,102 @@ class ReferralService:
         nearest_ambulance.current_patient = patient_id
         nearest_ambulance.destination = patient.receiving_hospital
         self.notification_service.send_pickup_notification_to_driver(patient, nearest_ambulance)
-        self.db.session.commit()
+        self.database.session.commit()
         st.success(f"🚑 Nearest ambulance {nearest_ambulance.ambulance_id} assigned to patient {patient.name}")
         return True
 
     def mark_patient_picked_up(self, patient_id):
-        patient = self.db.get_patient_by_id(patient_id)
+        patient = self.database.get_patient_by_id(patient_id)
         if not patient:
             st.error("Patient not found")
             return False
-        ambulance = self.db.session.query(Ambulance).filter(Ambulance.ambulance_id == patient.assigned_ambulance).first()
+        ambulance = self.database.session.query(Ambulance).filter(
+            Ambulance.ambulance_id == patient.assigned_ambulance
+        ).first()
         if not ambulance:
             st.error("Assigned ambulance not found")
             return False
         patient.status = 'Patient Picked Up'
         patient.pickup_notification_sent = True
         self.notification_service.send_enroute_notification_to_hospital(patient, ambulance)
-        self.db.session.commit()
+        self.database.session.commit()
         st.success(f"✅ Patient {patient.name} marked as picked up. Receiving hospital notified.")
         return True
 
 
+# =============================================================================
+# AMBULANCE SERVICE
+# =============================================================================
 class AmbulanceService:
-    def __init__(self, db):
-        self.db = db
+    def __init__(self, database):
+        self.database = database
 
     def get_available_ambulances_df(self):
-        ambulances = self.db.get_available_ambulances()
-        data = [{'Ambulance ID': a.ambulance_id, 'Driver': a.driver_name, 'Contact': a.driver_contact,
-                 'Location': a.current_location, 'Status': a.status, 'Fuel Level': f"{a.fuel_level:.1f}%"} for a in ambulances]
+        ambulances = self.database.get_available_ambulances()
+        data = [{
+            'Ambulance ID': a.ambulance_id,
+            'Driver': a.driver_name,
+            'Contact': a.driver_contact,
+            'Location': a.current_location,
+            'Status': a.status,
+            'Fuel Level': f"{a.fuel_level:.1f}%"
+        } for a in ambulances]
         return pd.DataFrame(data)
 
     def update_ambulance_location(self, ambulance_id, latitude, longitude, location_name, patient_id=None):
         try:
-            ambulance = self.db.session.query(Ambulance).filter(Ambulance.ambulance_id == ambulance_id).first()
+            ambulance = self.database.session.query(Ambulance).filter(
+                Ambulance.ambulance_id == ambulance_id
+            ).first()
             if ambulance:
                 ambulance.latitude = latitude
                 ambulance.longitude = longitude
                 ambulance.current_location = location_name
                 ambulance.last_location_update = datetime.utcnow()
-                self.db.session.commit()
-                self.db.add_location_update({'ambulance_id': ambulance_id, 'latitude': latitude,
-                                              'longitude': longitude, 'location_name': location_name, 'patient_id': patient_id})
+                self.database.session.commit()
+                self.database.add_location_update({
+                    'ambulance_id': ambulance_id,
+                    'latitude': latitude,
+                    'longitude': longitude,
+                    'location_name': location_name,
+                    'patient_id': patient_id
+                })
                 return True
         except Exception as e:
             st.error(f"Error updating ambulance location: {e}")
         return False
 
     def get_ambulance_with_fuel_info(self, ambulance_id):
-        ambulance = self.db.session.query(Ambulance).filter(Ambulance.ambulance_id == ambulance_id).first()
+        ambulance = self.database.session.query(Ambulance).filter(
+            Ambulance.ambulance_id == ambulance_id
+        ).first()
         if ambulance:
-            fuel_status = "🟢 Good" if ambulance.fuel_level > 50 else "🟡 Low" if ambulance.fuel_level > 20 else "🔴 Critical"
-            return {'ambulance': ambulance, 'fuel_level': ambulance.fuel_level, 'fuel_status': fuel_status}
+            if ambulance.fuel_level > 50:
+                fuel_status = "🟢 Good"
+            elif ambulance.fuel_level > 20:
+                fuel_status = "🟡 Low"
+            else:
+                fuel_status = "🔴 Critical"
+            return {
+                'ambulance': ambulance,
+                'fuel_level': ambulance.fuel_level,
+                'fuel_status': fuel_status
+            }
         return None
 
 
+# =============================================================================
+# LOCATION SIMULATOR
+# =============================================================================
 class LocationSimulator:
-    def __init__(self, db):
-        self.db = db
+    def __init__(self, database):
+        self.database = database
         self.running = False
 
     def start_simulation(self, ambulance_id, patient_id, start_lat, start_lng, end_lat, end_lng):
         self.running = True
-        ambulance_service = AmbulanceService(self.db)
-        initial_distance = self.db.calculate_distance(start_lat, start_lng, end_lat, end_lng)
-        current_lat, current_lng = start_lat, start_lng
+        ambulance_service = AmbulanceService(self.database)
+        initial_distance = self.database.calculate_distance(start_lat, start_lng, end_lat, end_lng)
         steps = 20
         lat_step = (end_lat - start_lat) / steps
         lng_step = (end_lng - start_lng) / steps
@@ -1378,61 +1510,89 @@ class LocationSimulator:
                 break
             current_lat = start_lat + (lat_step * step)
             current_lng = start_lng + (lng_step * step)
-            ambulance_service.update_ambulance_location(ambulance_id, current_lat, current_lng,
-                                                         f"En route - Step {step}/{steps}", patient_id)
+            ambulance_service.update_ambulance_location(
+                ambulance_id, current_lat, current_lng,
+                f"En route - Step {step}/{steps}", patient_id
+            )
             if step > 0:
-                self.db.update_ambulance_fuel(ambulance_id, initial_distance / steps)
+                self.database.update_ambulance_fuel(ambulance_id, initial_distance / steps)
             time.sleep(5)
         if self.running:
-            ambulance = self.db.session.query(Ambulance).filter(Ambulance.ambulance_id == ambulance_id).first()
+            ambulance = self.database.session.query(Ambulance).filter(
+                Ambulance.ambulance_id == ambulance_id
+            ).first()
             if ambulance:
                 ambulance.status = 'Available'
                 ambulance.current_patient = None
-                self.db.session.commit()
+                self.database.session.commit()
 
     def stop_simulation(self):
         self.running = False
 
+
 # =============================================================================
-# UTILITIES (UNCHANGED)
+# MAP UTILS
 # =============================================================================
 class MapUtils:
     @staticmethod
-    def create_uber_style_map(patient, ambulance, hospitals_df):
-        if not ambulance or not patient:
+    def create_uber_style_map(patient, ambulance, hosp_df):
+        if not PYDECK_AVAILABLE or not ambulance or not patient:
             return None
         try:
-            referring_hospital_data = hospitals_df[hospitals_df['facility_name'] == patient.referring_hospital].iloc[0]
-            receiving_hospital_data = hospitals_df[hospitals_df['facility_name'] == patient.receiving_hospital].iloc[0]
+            referring_hospital_data = hosp_df[hosp_df['facility_name'] == patient.referring_hospital].iloc[0]
+            receiving_hospital_data = hosp_df[hosp_df['facility_name'] == patient.receiving_hospital].iloc[0]
         except IndexError:
             return None
         hospitals_layer = pdk.Layer('ScatterplotLayer', data=[
-            {'name': patient.referring_hospital, 'coordinates': [referring_hospital_data['longitude'], referring_hospital_data['latitude']], 'color': [0, 128, 0, 200], 'radius': 300},
-            {'name': patient.receiving_hospital, 'coordinates': [receiving_hospital_data['longitude'], receiving_hospital_data['latitude']], 'color': [255, 0, 0, 200], 'radius': 300}
+            {
+                'name': patient.referring_hospital,
+                'coordinates': [referring_hospital_data['longitude'], referring_hospital_data['latitude']],
+                'color': [0, 128, 0, 200], 'radius': 300
+            },
+            {
+                'name': patient.receiving_hospital,
+                'coordinates': [receiving_hospital_data['longitude'], receiving_hospital_data['latitude']],
+                'color': [255, 0, 0, 200], 'radius': 300
+            }
         ], get_position='coordinates', get_color='color', get_radius='radius', pickable=True)
+
         ambulance_layer = pdk.Layer('ScatterplotLayer', data=[{
             'name': f"Ambulance {ambulance.ambulance_id} - Fuel: {ambulance.fuel_level:.1f}%",
-            'coordinates': [ambulance.longitude, ambulance.latitude], 'color': [0, 0, 255, 200], 'radius': 200
+            'coordinates': [ambulance.longitude, ambulance.latitude],
+            'color': [0, 0, 255, 200], 'radius': 200
         }], get_position='coordinates', get_color='color', get_radius='radius', pickable=True)
+
         route_layer = pdk.Layer('LineLayer', data=[{'path': [
             [referring_hospital_data['longitude'], referring_hospital_data['latitude']],
             [ambulance.longitude, ambulance.latitude],
             [receiving_hospital_data['longitude'], receiving_hospital_data['latitude']]
         ], 'color': [255, 165, 0, 150]}], get_path='path', get_color='color', get_width=5, pickable=True)
-        center_lat = (referring_hospital_data['latitude'] + receiving_hospital_data['latitude'] + ambulance.latitude) / 3
-        center_lng = (referring_hospital_data['longitude'] + receiving_hospital_data['longitude'] + ambulance.longitude) / 3
+
+        center_lat = (
+            referring_hospital_data['latitude'] +
+            receiving_hospital_data['latitude'] +
+            ambulance.latitude
+        ) / 3
+        center_lng = (
+            referring_hospital_data['longitude'] +
+            receiving_hospital_data['longitude'] +
+            ambulance.longitude
+        ) / 3
         view_state = pdk.ViewState(latitude=center_lat, longitude=center_lng, zoom=11, pitch=0)
-        return pdk.Deck(layers=[hospitals_layer, ambulance_layer, route_layer], initial_view_state=view_state,
-                        tooltip={'html': '<b>{name}</b>', 'style': {'color': 'white'}})
+        return pdk.Deck(
+            layers=[hospitals_layer, ambulance_layer, route_layer],
+            initial_view_state=view_state,
+            tooltip={'html': '<b>{name}</b>', 'style': {'color': 'white'}}
+        )
 
     @staticmethod
-    def create_real_time_tracking_map(patient, ambulance, hospitals_df):
+    def create_real_time_tracking_map(patient, ambulance, hosp_df):
         if not ambulance or not patient:
             st.info("Waiting for ambulance assignment...")
             return
         try:
-            referring_hospital_data = hospitals_df[hospitals_df['facility_name'] == patient.referring_hospital].iloc[0]
-            receiving_hospital_data = hospitals_df[hospitals_df['facility_name'] == patient.receiving_hospital].iloc[0]
+            referring_hospital_data = hosp_df[hosp_df['facility_name'] == patient.referring_hospital].iloc[0]
+            receiving_hospital_data = hosp_df[hosp_df['facility_name'] == patient.receiving_hospital].iloc[0]
         except IndexError:
             st.error("Hospital data not found.")
             return
@@ -1442,37 +1602,68 @@ class MapUtils:
         with col2:
             st.metric("Driver", ambulance.driver_name)
         with col3:
-            fuel_status = "🟢 Good" if ambulance.fuel_level > 50 else "🟡 Low" if ambulance.fuel_level > 20 else "🔴 Critical"
+            if ambulance.fuel_level > 50:
+                fuel_status = "🟢 Good"
+            elif ambulance.fuel_level > 20:
+                fuel_status = "🟡 Low"
+            else:
+                fuel_status = "🔴 Critical"
             st.metric("Fuel Level", f"{ambulance.fuel_level:.1f}%", fuel_status)
         with col4:
             st.metric("Status", ambulance.status)
+
         if Config.GOOGLE_MAPS_API_KEY and ambulance.latitude and ambulance.longitude:
             st.subheader("📍 Live Ambulance Tracking on Google Maps")
-            map_html = f"""<iframe width="100%" height="500" frameborder="0" style="border:0"
-                src="https://www.google.com/maps/embed/v1/view?key={Config.GOOGLE_MAPS_API_KEY}&center={ambulance.latitude},{ambulance.longitude}&zoom=13&maptype=roadmap"
-                allowfullscreen></iframe>"""
+            map_html = (
+                f'<iframe width="100%" height="500" frameborder="0" style="border:0" '
+                f'src="https://www.google.com/maps/embed/v1/view?key={Config.GOOGLE_MAPS_API_KEY}'
+                f'&center={ambulance.latitude},{ambulance.longitude}&zoom=13&maptype=roadmap" '
+                f'allowfullscreen></iframe>'
+            )
             st.components.v1.html(map_html, height=520)
         else:
             st.subheader("📍 Live Ambulance Tracking")
-            map_obj = MapUtils.create_uber_style_map(patient, ambulance, hospitals_df)
-            if map_obj:
-                st.pydeck_chart(map_obj)
+            if PYDECK_AVAILABLE:
+                map_obj = MapUtils.create_uber_style_map(patient, ambulance, hosp_df)
+                if map_obj:
+                    st.pydeck_chart(map_obj)
+            else:
+                if ambulance.latitude and ambulance.longitude:
+                    map_data = pd.DataFrame({
+                        'lat': [ambulance.latitude, referring_hospital_data['latitude'], receiving_hospital_data['latitude']],
+                        'lon': [ambulance.longitude, referring_hospital_data['longitude'], receiving_hospital_data['longitude']],
+                    })
+                    st.map(map_data)
 
 
+# =============================================================================
+# PDF EXPORTER (simple)
+# =============================================================================
 class PDFExporter:
     def __init__(self):
-        self.styles = getSampleStyleSheet()
+        if REPORTLAB_AVAILABLE:
+            self.styles = getSampleStyleSheet()
 
     def export_referral_form(self, patient, ambulance, output_path):
+        if not REPORTLAB_AVAILABLE:
+            return None
         doc = SimpleDocTemplate(output_path, pagesize=A4)
         story = []
-        title_style = ParagraphStyle('CustomTitle', parent=self.styles['Heading1'], fontSize=16, spaceAfter=30, alignment=1)
+        title_style = ParagraphStyle(
+            'CustomTitle', parent=self.styles['Heading1'],
+            fontSize=16, spaceAfter=30, alignment=1
+        )
         story.append(Paragraph("HOSPITAL PATIENT REFERRAL FORM", title_style))
         story.append(Spacer(1, 20))
-        patient_data = [['Patient Information', ''], ['Patient ID:', patient.patient_id],
-                        ['Name:', patient.name], ['Age:', str(patient.age)],
-                        ['Condition:', patient.condition], ['Referring Physician:', patient.referring_physician]]
-        patient_table = Table(patient_data, colWidths=[2*inch, 4*inch])
+        patient_data = [
+            ['Patient Information', ''],
+            ['Patient ID:', patient.patient_id],
+            ['Name:', patient.name],
+            ['Age:', str(patient.age)],
+            ['Condition:', patient.condition],
+            ['Referring Physician:', patient.referring_physician]
+        ]
+        patient_table = Table(patient_data, colWidths=[2 * inch, 4 * inch])
         patient_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -1484,27 +1675,12 @@ class PDFExporter:
             ('GRID', (0, 0), (-1, -1), 1, colors.black)
         ]))
         story.append(patient_table)
-        story.append(Spacer(1, 20))
         doc.build(story)
         return output_path
 
 
-class SecurityUtils:
-    @staticmethod
-    def generate_secure_password(length=12):
-        alphabet = string.ascii_letters + string.digits + string.punctuation
-        return ''.join(secrets.choice(alphabet) for _ in range(length))
-
-    @staticmethod
-    def hash_password(password):
-        return hashlib.sha256(password.encode()).hexdigest()
-
-    @staticmethod
-    def verify_password(password, hashed):
-        return SecurityUtils.hash_password(password) == hashed
-
 # =============================================================================
-# DATA MODELS (UNCHANGED)
+# HOSPITALS DATA
 # =============================================================================
 hospitals_data = {
     'facility_name': [
@@ -1546,15 +1722,10 @@ hospitals_data = {
         'Health Centre', 'Health Centre'
     ],
     'capacity': [
-        500, 400, 100, 100, 100, 75, 75, 78, 77, 80, 70, 60, 65, 50, 52, 40, 42, 30, 35, 20, 20, 25, 15, 24, 15, 10, 19, 5, 19, 10, 5, 15, 17, 16, 45, 30, 29, 55, 30, 30
+        500, 400, 100, 100, 100, 75, 75, 78, 77, 80, 70, 60, 65, 50, 52, 40, 42, 30, 35, 20, 20, 25,
+        15, 24, 15, 10, 19, 5, 19, 10, 5, 15, 17, 16, 45, 30, 29, 55, 30, 30
     ],
-    'ambulance_services': [
-        'Available', 'Available', 'Limited', 'Limited', 'Limited', 'Limited', 'Limited', 'Limited',
-        'Limited', 'Limited', 'Limited', 'Limited', 'Limited', 'Limited', 'Limited', 'Limited',
-        'Limited', 'Limited', 'Limited', 'Limited', 'Limited', 'Limited', 'Limited', 'Limited',
-        'Limited', 'Limited', 'Limited', 'Limited', 'Limited', 'Limited', 'Limited', 'Limited',
-        'Limited', 'Limited', 'Limited', 'Limited', 'Limited', 'Limited', 'Limited', 'Limited'
-    ],
+    'ambulance_services': ['Available', 'Available'] + ['Limited'] * 38,
     'contact_number': [
         '+254-57-2055000', '+254-57-2021578', '+254-57-2023456', '+254-57-2034567', '+254-57-2045678',
         '+254-57-2056789', '+254-57-2067890', '+254-57-2078901', '+254-57-2089012', '+254-57-2090123',
@@ -1570,39 +1741,26 @@ hospitals_data = {
 hospitals_df = pd.DataFrame(hospitals_data)
 
 ambulances_data = {
-    'ambulance_id': ['KBA 453D', 'KBC 217F', 'KBD 389G', 'KBE 142H', 'KBF 561J', 'KBG 774K', 'KBH 238L', 'KBJ 965M',
-                     'KBK 482N', 'KBL 751P', 'KBM 312Q', 'KBN 864R', 'KBP 459S', 'KBQ 287T', 'KBR 913U', 'KBS 506V',
-                     'KBT 678W', 'KBU 134X', 'KBV 925Y', 'KBX 743Z'],
-    'current_location': [
-        'Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)',
-        'Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)',
-        'Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)',
-        'Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)',
-        'Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)',
-        'Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)',
-        'Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)',
-        'Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)',
-        'Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)',
-        'Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)',
-        'Kisumu County Referral Hospital', 'Kisumu County Referral Hospital', 'Kisumu County Referral Hospital',
-        'Kisumu County Referral Hospital', 'Kisumu County Referral Hospital', 'Kisumu County Referral Hospital',
-        'Kisumu County Referral Hospital', 'Lumumba Sub-County Hospital', 'Lumumba Sub-County Hospital',
-        'Ahero Sub-County Hospital'
+    'ambulance_id': [
+        'KBA 453D', 'KBC 217F', 'KBD 389G', 'KBE 142H', 'KBF 561J', 'KBG 774K',
+        'KBH 238L', 'KBJ 965M', 'KBK 482N', 'KBL 751P', 'KBM 312Q', 'KBN 864R',
+        'KBP 459S', 'KBQ 287T', 'KBR 913U', 'KBS 506V', 'KBT 678W', 'KBU 134X',
+        'KBV 925Y', 'KBX 743Z'
     ],
-    'latitude': [
-        -0.0754, -0.0754, -0.0754, -0.0754, -0.0754, -0.0754, -0.0754, -0.0754, -0.0754, -0.0754,
-        -0.0754, -0.0754, -0.0754, -0.0754, -0.0754, -0.0754, -0.0754, -0.1058, -0.1058, -0.1743
-    ],
-    'longitude': [
-        34.7695, 34.7695, 34.7695, 34.7695, 34.7695, 34.7695, 34.7695, 34.7695, 34.7695, 34.7695,
-        34.7695, 34.7695, 34.7695, 34.7695, 34.7695, 34.7695, 34.7695, 34.7568, 34.7568, 34.9169
-    ],
+    'current_location': (
+        ['Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)'] * 10 +
+        ['Kisumu County Referral Hospital'] * 7 +
+        ['Lumumba Sub-County Hospital'] * 2 +
+        ['Ahero Sub-County Hospital'] * 1
+    ),
+    'latitude': [-0.0754] * 10 + [-0.0754] * 7 + [-0.1058] * 2 + [-0.1743] * 1,
+    'longitude': [34.7695] * 10 + [34.7695] * 7 + [34.7568] * 2 + [34.9169] * 1,
     'status': ['Available'] * 20,
     'driver_name': [
-        'John Omondi', 'Mary Achieng', 'Paul Otieno', 'Susan Akinyi', 'David Owino', 'James Okoth',
-        'Grace Atieno', 'Peter Onyango', 'Alice Adhiambo', 'Robert Ochieng', 'Sarah Nyongesa',
-        'Michael Odhiambo', 'Elizabeth Awuor', 'Daniel Omondi', 'Lucy Anyango', 'Brian Ouma',
-        'Patricia Adongo', 'Samuel Owuor', 'Rebecca Aoko', 'Kevin Onyango'
+        'John Omondi', 'Mary Achieng', 'Paul Otieno', 'Susan Akinyi', 'David Owino',
+        'James Okoth', 'Grace Atieno', 'Peter Onyango', 'Alice Adhiambo', 'Robert Ochieng',
+        'Sarah Nyongesa', 'Michael Odhiambo', 'Elizabeth Awuor', 'Daniel Omondi', 'Lucy Anyango',
+        'Brian Ouma', 'Patricia Adongo', 'Samuel Owuor', 'Rebecca Aoko', 'Kevin Onyango'
     ],
     'driver_contact': [
         '+254712345678', '+254723456789', '+254734567890', '+254745678901', '+254756789012',
@@ -1624,9 +1782,8 @@ ambulances_data = {
 }
 
 
-def initialize_sample_data(db):
-    existing_ambulances = db.session.query(Ambulance).count()
-    if existing_ambulances == 0:
+def initialize_sample_data(database):
+    if database.session.query(Ambulance).count() == 0:
         for idx, amb_id in enumerate(ambulances_data['ambulance_id']):
             ambulance = Ambulance(
                 ambulance_id=amb_id,
@@ -1638,51 +1795,57 @@ def initialize_sample_data(db):
                 driver_contact=ambulances_data['driver_contact'][idx],
                 fuel_level=ambulances_data['fuel_level'][idx]
             )
-            db.session.add(ambulance)
-        db.session.commit()
+            database.session.add(ambulance)
+        database.session.commit()
 
-    # Seed bed capacity for referral hospitals
-    if db.session.query(BedCapacity).count() == 0:
+    if database.session.query(BedCapacity).count() == 0:
         seed_capacities = [
-            {'hospital_name': 'Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)',
-             'total_beds': 500, 'occupied_beds': 420, 'icu_total': 40, 'icu_occupied': 35,
-             'maternity_total': 60, 'maternity_occupied': 50, 'paediatric_total': 50, 'paediatric_occupied': 38,
-             'cardiologist_available': True, 'surgeon_available': True, 'obstetrician_available': True, 'paediatrician_available': True},
-            {'hospital_name': 'Kisumu County Referral Hospital',
-             'total_beds': 400, 'occupied_beds': 280, 'icu_total': 20, 'icu_occupied': 12,
-             'maternity_total': 40, 'maternity_occupied': 25, 'paediatric_total': 30, 'paediatric_occupied': 18,
-             'cardiologist_available': False, 'surgeon_available': True, 'obstetrician_available': True, 'paediatrician_available': True},
+            {
+                'hospital_name': 'Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)',
+                'total_beds': 500, 'occupied_beds': 420, 'icu_total': 40, 'icu_occupied': 35,
+                'maternity_total': 60, 'maternity_occupied': 50, 'paediatric_total': 50, 'paediatric_occupied': 38,
+                'cardiologist_available': True, 'surgeon_available': True,
+                'obstetrician_available': True, 'paediatrician_available': True
+            },
+            {
+                'hospital_name': 'Kisumu County Referral Hospital',
+                'total_beds': 400, 'occupied_beds': 280, 'icu_total': 20, 'icu_occupied': 12,
+                'maternity_total': 40, 'maternity_occupied': 25, 'paediatric_total': 30, 'paediatric_occupied': 18,
+                'cardiologist_available': False, 'surgeon_available': True,
+                'obstetrician_available': True, 'paediatrician_available': True
+            },
         ]
         for cap_data in seed_capacities:
             cap = BedCapacity(**cap_data)
-            db.session.add(cap)
-        db.session.commit()
+            database.session.add(cap)
+        database.session.commit()
 
-    # Seed demo SHA members
-    if db.session.query(SHAMember).count() == 0:
+    if database.session.query(SHAMember).count() == 0:
         demo_members = [
-            SHAMember(sha_member_number='SHA-001234', national_id='12345678', member_name='Demo Patient One', active=True, cover_type='SHIF'),
-            SHAMember(sha_member_number='SHA-005678', national_id='87654321', member_name='Demo Patient Two', active=True, cover_type='SHIF'),
-            SHAMember(sha_member_number='SHA-009999', national_id='11223344', member_name='Demo Patient Three', active=False, cover_type='NHIF Legacy'),
+            SHAMember(sha_member_number='SHA-001234', national_id='12345678',
+                      member_name='Demo Patient One', active=True, cover_type='SHIF'),
+            SHAMember(sha_member_number='SHA-005678', national_id='87654321',
+                      member_name='Demo Patient Two', active=True, cover_type='SHIF'),
+            SHAMember(sha_member_number='SHA-009999', national_id='11223344',
+                      member_name='Demo Patient Three', active=False, cover_type='NHIF Legacy'),
         ]
         for m in demo_members:
-            db.session.add(m)
-        db.session.commit()
+            database.session.add(m)
+        database.session.commit()
+
 
 # =============================================================================
-# UI COMPONENTS — ENHANCED WITH CRITICAL GAPS WOVEN IN
+# DASHBOARD UI
 # =============================================================================
-
 class DashboardUI:
-    def __init__(self, db, analytics):
-        self.db = db
+    def __init__(self, database, analytics):
+        self.database = database
         self.analytics = analytics
 
     def display(self):
         st.title("📊 Dashboard Overview")
-        # GAP 1: Offline banner
         OfflineService.inject_pwa_manifest()
-        OfflineService.render_offline_queue_status(self.db)
+        OfflineService.render_offline_queue_status(self.database)
 
         kpis = self.analytics.get_kpis()
         col1, col2, col3, col4, col5 = st.columns(5)
@@ -1697,25 +1860,46 @@ class DashboardUI:
         with col5:
             st.metric("Completion Rate", kpis['completion_rate'])
 
-        # GAP 3: Bed capacity summary
         st.markdown("---")
         st.subheader("🏥 Referral Hospital Capacity")
-        referral_hospitals = ['Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)', 'Kisumu County Referral Hospital']
+        referral_hospitals = [
+            'Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)',
+            'Kisumu County Referral Hospital'
+        ]
         cap_cols = st.columns(2)
         for i, hosp in enumerate(referral_hospitals):
-            cap = self.db.get_bed_capacity(hosp)
+            cap = self.database.get_bed_capacity(hosp)
             with cap_cols[i]:
                 if cap:
                     occ_pct = (cap.occupied_beds / cap.total_beds * 100) if cap.total_beds > 0 else 0
-                    status_color = "🔴" if occ_pct >= 90 else "🟡" if occ_pct >= 70 else "🟢"
-                    st.markdown(f"""
-                    <div style="background:{'#FCEBEB' if occ_pct>=90 else '#FAEEDA' if occ_pct>=70 else '#EAF3DE'};
-                    padding:12px;border-radius:8px;">
-                    <b>{status_color} {hosp.split('(')[0].strip()}</b><br>
-                    Beds: {cap.occupied_beds}/{cap.total_beds} ({occ_pct:.0f}% occupied)<br>
-                    ICU: {cap.icu_occupied}/{cap.icu_total} &nbsp;|&nbsp; Maternity: {cap.maternity_occupied}/{cap.maternity_total}<br>
-                    Specialists: {'Cardiologist ✅' if cap.cardiologist_available else ''} {'Surgeon ✅' if cap.surgeon_available else ''} {'OB/GYN ✅' if cap.obstetrician_available else ''}
-                    </div>""", unsafe_allow_html=True)
+                    if occ_pct >= 90:
+                        status_color = "🔴"
+                        bg = '#FCEBEB'
+                    elif occ_pct >= 70:
+                        status_color = "🟡"
+                        bg = '#FAEEDA'
+                    else:
+                        status_color = "🟢"
+                        bg = '#EAF3DE'
+                    short_name = hosp.split('(')[0].strip()
+                    specialists = []
+                    if cap.cardiologist_available:
+                        specialists.append('Cardiologist ✅')
+                    if cap.surgeon_available:
+                        specialists.append('Surgeon ✅')
+                    if cap.obstetrician_available:
+                        specialists.append('OB/GYN ✅')
+                    spec_str = ' '.join(specialists) if specialists else 'None available'
+                    st.markdown(
+                        f'<div style="background:{bg};padding:12px;border-radius:8px;">'
+                        f'<b>{status_color} {short_name}</b><br>'
+                        f'Beds: {cap.occupied_beds}/{cap.total_beds} ({occ_pct:.0f}% occupied)<br>'
+                        f'ICU: {cap.icu_occupied}/{cap.icu_total} &nbsp;|&nbsp; '
+                        f'Maternity: {cap.maternity_occupied}/{cap.maternity_total}<br>'
+                        f'Specialists: {spec_str}'
+                        f'</div>',
+                        unsafe_allow_html=True
+                    )
                 else:
                     st.info(f"No capacity data for {hosp}")
 
@@ -1730,6 +1914,9 @@ class DashboardUI:
 
     def display_referral_trends(self):
         st.subheader("Referral Trends")
+        if not PLOTLY_AVAILABLE:
+            st.info("Plotly not available for charts.")
+            return
         trends = self.analytics.get_referral_trends()
         if not trends.empty:
             fig = px.line(trends, x='date', y='count', title="Daily Referral Trends")
@@ -1739,18 +1926,25 @@ class DashboardUI:
 
     def display_ambulance_status(self):
         st.subheader("Ambulance Status")
-        ambulances = self.db.get_all_ambulances()
+        if not PLOTLY_AVAILABLE:
+            st.info("Plotly not available for charts.")
+            return
+        ambulances = self.database.get_all_ambulances()
         if ambulances:
             status_counts = {}
             for ambulance in ambulances:
                 status_counts[ambulance.status] = status_counts.get(ambulance.status, 0) + 1
-            fig = px.pie(values=list(status_counts.values()), names=list(status_counts.keys()), title="Ambulance Status Distribution")
+            fig = px.pie(
+                values=list(status_counts.values()),
+                names=list(status_counts.keys()),
+                title="Ambulance Status Distribution"
+            )
             st.plotly_chart(fig, use_container_width=True, key="ambulance_status_chart")
         else:
             st.info("No ambulance data available")
 
     def display_recent_referrals(self):
-        patients = self.db.get_all_patients()
+        patients = self.database.get_all_patients()
         recent_patients = sorted(patients, key=lambda x: x.referral_time, reverse=True)[:5]
         if recent_patients:
             data = []
@@ -1772,14 +1966,17 @@ class DashboardUI:
             st.info("No recent referrals")
 
 
+# =============================================================================
+# REFERRAL UI
+# =============================================================================
 class ReferralUI:
-    def __init__(self, db, notification_service):
-        self.db = db
+    def __init__(self, database, notification_service):
+        self.database = database
         self.notification_service = notification_service
-        self.referral_service = ReferralService(db, notification_service)
-        self.sha_service = SHABillingService(db)
+        self.referral_service = ReferralService(database, notification_service)
+        self.sha_service = SHABillingService(database)
         self.moh_service = MOHReferralLetterService()
-        self.bed_service = BedCapacityService(db)
+        self.bed_service = BedCapacityService(database)
 
     def display(self):
         st.title("📋 Patient Referral Management")
@@ -1798,7 +1995,11 @@ class ReferralUI:
         ]
 
     def get_referring_hospitals(self, user_hospital):
-        if user_hospital in ["All Facilities", "Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)", "Kisumu County Referral Hospital"]:
+        if user_hospital in [
+            "All Facilities",
+            "Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)",
+            "Kisumu County Referral Hospital"
+        ]:
             return hospitals_data['facility_name']
         return [user_hospital]
 
@@ -1813,21 +2014,23 @@ class ReferralUI:
                 age = st.number_input("Age*", min_value=0, max_value=120, value=30)
                 condition = st.text_input("Medical Condition*")
                 referring_physician = st.text_input("Referring Physician*")
-                referring_hospitals = self.get_referring_hospitals(user_hospital)
-                referring_hospital = st.selectbox("Referring Hospital*", referring_hospitals)
+                referring_hospitals_list = self.get_referring_hospitals(user_hospital)
+                referring_hospital = st.selectbox("Referring Hospital*", referring_hospitals_list)
 
             with col2:
-                receiving_hospitals = self.get_receiving_hospitals(user_hospital)
-                receiving_hospital = st.selectbox("Receiving Hospital*", receiving_hospitals)
+                receiving_hospitals_list = self.get_receiving_hospitals(user_hospital)
+                receiving_hospital = st.selectbox("Receiving Hospital*", receiving_hospitals_list)
                 receiving_physician = st.text_input("Receiving Physician")
                 if referring_hospital == receiving_hospital:
                     st.warning("⚠️ Referring and receiving hospitals cannot be the same.")
-
-                # GAP 3: Show capacity badge inline
                 if receiving_hospital:
                     badge, color = self.bed_service.get_capacity_badge(receiving_hospital)
                     bg = {'red': '#FCEBEB', 'amber': '#FAEEDA', 'green': '#EAF3DE', 'unknown': '#F5F5F5'}[color]
-                    st.markdown(f'<div style="background:{bg};padding:6px 10px;border-radius:6px;font-size:13px;"><b>Receiving Hospital Capacity:</b> {badge}</div>', unsafe_allow_html=True)
+                    st.markdown(
+                        f'<div style="background:{bg};padding:6px 10px;border-radius:6px;font-size:13px;">'
+                        f'<b>Receiving Hospital Capacity:</b> {badge}</div>',
+                        unsafe_allow_html=True
+                    )
                     if color == 'red':
                         st.error("⚠️ Receiving hospital is at or above 90% capacity. Consider alternatives.")
 
@@ -1837,38 +2040,45 @@ class ReferralUI:
                 current_medications = st.text_area("Current Medications")
                 allergies = st.text_area("Allergies")
 
-            # GAP 1: MEWS Triage (inside form — display only, no interactive elements)
             st.markdown("---")
             st.subheader("🏥 Triage Level")
-            triage_level = st.selectbox("Select Triage Level*",
+            triage_level = st.selectbox(
+                "Select Triage Level*",
                 ["Green — Routine", "Orange — Urgent", "Red — Immediate"],
-                help="Use MEWS Calculator tab to compute score before selecting")
-            mews_score = st.number_input("MEWS Score", min_value=0, max_value=20, value=0,
-                help="Calculate using the MEWS Calculator below, then enter the score here")
-            triage_map = {"Green — Routine": "Green", "Orange — Urgent": "Orange", "Red — Immediate": "Red"}
+                help="Use MEWS Calculator tab to compute score before selecting"
+            )
+            mews_score = st.number_input(
+                "MEWS Score", min_value=0, max_value=20, value=0,
+                help="Calculate using the MEWS Calculator below, then enter the score here"
+            )
+            triage_map = {
+                "Green — Routine": "Green",
+                "Orange — Urgent": "Orange",
+                "Red — Immediate": "Red"
+            }
             selected_triage = triage_map[triage_level]
             if selected_triage == 'Red':
                 st.error("🚨 RED TRIAGE: Immediate response required. ALS ambulance will be prioritised.")
             elif selected_triage == 'Orange':
                 st.warning("⚡ ORANGE TRIAGE: Urgent — transfer should occur within 30 minutes.")
 
-            # Ambulance assignment
             st.markdown("---")
             st.subheader("🚑 Ambulance Assignment")
             require_als = selected_triage == 'Red'
             if require_als:
                 st.warning("🔴 Red triage: system will prioritise Advanced Life Support (ALS) ambulances.")
-            assignment_method = st.radio("Assignment Method",
+            assignment_method = st.radio(
+                "Assignment Method",
                 ["Auto-assign nearest ambulance", "Manual selection"],
-                help="Auto-assign finds the nearest available ambulance with sufficient fuel")
+            )
+            ambulance_choice = "Auto-assign"
             if assignment_method == "Manual selection":
-                available_ambulances = self.db.get_available_ambulances()
+                available_ambulances = self.database.get_available_ambulances()
                 ambulance_options = ["Select ambulance"] + [
-                    f"{amb.ambulance_id} - {amb.driver_name} (Fuel: {amb.fuel_level:.1f}%)" for amb in available_ambulances
+                    f"{amb.ambulance_id} - {amb.driver_name} (Fuel: {amb.fuel_level:.1f}%)"
+                    for amb in available_ambulances
                 ]
                 ambulance_choice = st.selectbox("Select Ambulance", ambulance_options)
-            else:
-                ambulance_choice = "Auto-assign"
 
             submitted = st.form_submit_button("Create Referral", use_container_width=True)
             if submitted:
@@ -1877,39 +2087,49 @@ class ReferralUI:
                 elif referring_hospital == receiving_hospital:
                     st.error("Referring and receiving hospitals cannot be the same.")
                 else:
-                    cap_status, cap_pct = self.db.get_capacity_status(receiving_hospital)
+                    cap_status, cap_pct = self.database.get_capacity_status(receiving_hospital)
                     if cap_status == 'red':
-                        st.error(f"⚠️ {receiving_hospital} is at {cap_pct:.0f}% capacity. Referral blocked. Please choose another facility or confirm clinically urgent.")
+                        st.error(
+                            f"⚠️ {receiving_hospital} is at {cap_pct:.0f}% capacity. "
+                            "Referral blocked. Please choose another facility."
+                        )
                     else:
-                        referring_hospital_data = hospitals_df[hospitals_df['facility_name'] == referring_hospital].iloc[0]
-                        receiving_hospital_data = hospitals_df[hospitals_df['facility_name'] == receiving_hospital].iloc[0]
+                        try:
+                            referring_hospital_data = hospitals_df[
+                                hospitals_df['facility_name'] == referring_hospital
+                            ].iloc[0]
+                            receiving_hospital_data = hospitals_df[
+                                hospitals_df['facility_name'] == receiving_hospital
+                            ].iloc[0]
+                        except IndexError:
+                            st.error("Hospital data not found.")
+                            return
 
-                        # Get SHA info from session state (set before form submit)
                         sha_verified = st.session_state.get('sha_verified', False)
                         sha_member = st.session_state.get('sha_member')
-
-                        # Generate MOH referral number
-                        moh_ref_num = f"MOH-KSM-{secrets.token_hex(3).upper()}-{datetime.utcnow().strftime('%Y%m%d')}"
+                        moh_ref_num = (
+                            f"MOH-KSM-{secrets.token_hex(3).upper()}-"
+                            f"{datetime.utcnow().strftime('%Y%m%d')}"
+                        )
 
                         patient_data = {
                             'name': name, 'age': age, 'condition': condition,
-                            'referring_hospital': referring_hospital, 'receiving_hospital': receiving_hospital,
-                            'referring_physician': referring_physician, 'receiving_physician': receiving_physician,
+                            'referring_hospital': referring_hospital,
+                            'receiving_hospital': receiving_hospital,
+                            'referring_physician': referring_physician,
+                            'receiving_physician': receiving_physician,
                             'notes': notes, 'medical_history': medical_history,
-                            'current_medications': current_medications, 'allergies': allergies,
-                            'status': 'Referred',
+                            'current_medications': current_medications,
+                            'allergies': allergies, 'status': 'Referred',
                             'referring_hospital_lat': float(referring_hospital_data['latitude']),
                             'referring_hospital_lng': float(referring_hospital_data['longitude']),
                             'receiving_hospital_lat': float(receiving_hospital_data['latitude']),
                             'receiving_hospital_lng': float(receiving_hospital_data['longitude']),
-                            # GAP 1 — Triage
                             'triage_level': selected_triage,
                             'mews_score': mews_score,
-                            # GAP 2 — SHA
                             'sha_verified': sha_verified,
                             'sha_member_number': sha_member.sha_member_number if sha_member else None,
                             'national_id': sha_member.national_id if sha_member else None,
-                            # GAP 5 — MOH letter
                             'moh_referral_number': moh_ref_num
                         }
                         if assignment_method == "Manual selection" and ambulance_choice != "Select ambulance":
@@ -1917,46 +2137,63 @@ class ReferralUI:
 
                         patient = self.referral_service.create_referral(patient_data, st.session_state.user)
                         if patient:
-                            st.success(f"✅ Referral created! Patient ID: **{patient.patient_id}** | MOH Ref: **{moh_ref_num}**")
-
+                            st.success(
+                                f"✅ Referral created! Patient ID: **{patient.patient_id}** "
+                                f"| MOH Ref: **{moh_ref_num}**"
+                            )
                             if assignment_method == "Auto-assign nearest ambulance":
-                                if self.referral_service.auto_assign_nearest_ambulance(patient.patient_id, require_als=require_als):
+                                if self.referral_service.auto_assign_nearest_ambulance(
+                                    patient.patient_id, require_als=require_als
+                                ):
                                     st.success("🚑 Nearest ambulance automatically assigned and driver notified!")
 
-                            # GAP 2: Auto-create SHA claim if ambulance assigned
                             if patient.assigned_ambulance:
                                 ref_lat = float(referring_hospital_data['latitude'])
                                 ref_lng = float(referring_hospital_data['longitude'])
                                 rec_lat = float(receiving_hospital_data['latitude'])
                                 rec_lng = float(receiving_hospital_data['longitude'])
-                                dist = self.db.calculate_distance(ref_lat, ref_lng, rec_lat, rec_lng)
-                                claim = self.db.create_sha_claim(patient.patient_id, patient.assigned_ambulance, dist)
-                                st.info(f"🏛️ SHA Claim {claim.claim_id} submitted — KSh {claim.total_amount:,.2f} for {dist:.1f} km")
-
-                            self.notification_service.send_notification(receiving_hospital,
-                                f"New patient referral: {name} — {condition} [{selected_triage} triage]", 'referral')
-
-                            # GAP 5: Offer MOH referral letter download
-                            st.subheader("📄 MOH Referral Letter")
-                            try:
-                                fresh_patient = self.db.get_patient_by_id(patient.patient_id)
-                                ref_data = hospitals_df[hospitals_df['facility_name'] == referring_hospital].iloc[0].to_dict()
-                                rec_data = hospitals_df[hospitals_df['facility_name'] == receiving_hospital].iloc[0].to_dict()
-                                pdf_bytes = self.moh_service.generate_moh_referral_letter(fresh_patient, ref_data, rec_data)
-                                st.download_button(
-                                    label="⬇️ Download MOH Referral Letter (PDF)",
-                                    data=pdf_bytes,
-                                    file_name=f"MOH_Referral_{patient.patient_id}_{datetime.utcnow().strftime('%Y%m%d')}.pdf",
-                                    mime="application/pdf",
-                                    key=f"moh_dl_{patient.patient_id}"
+                                dist = self.database.calculate_distance(ref_lat, ref_lng, rec_lat, rec_lng)
+                                claim = self.database.create_sha_claim(
+                                    patient.patient_id, patient.assigned_ambulance, dist
                                 )
-                                fresh_patient.referral_letter_generated = True
-                                self.db.session.commit()
-                                st.success("✅ MOH-standard referral letter generated with QR verification code.")
-                            except Exception as e:
-                                st.error(f"Error generating referral letter: {e}")
+                                st.info(
+                                    f"🏛️ SHA Claim {claim.claim_id} submitted — "
+                                    f"KSh {claim.total_amount:,.2f} for {dist:.1f} km"
+                                )
 
-        # GAP 2 & 1: SHA panel and MEWS calculator outside the form
+                            self.notification_service.send_notification(
+                                receiving_hospital,
+                                f"New patient referral: {name} — {condition} [{selected_triage} triage]",
+                                'referral'
+                            )
+
+                            if REPORTLAB_AVAILABLE:
+                                st.subheader("📄 MOH Referral Letter")
+                                try:
+                                    fresh_patient = self.database.get_patient_by_id(patient.patient_id)
+                                    ref_data = hospitals_df[
+                                        hospitals_df['facility_name'] == referring_hospital
+                                    ].iloc[0].to_dict()
+                                    rec_data = hospitals_df[
+                                        hospitals_df['facility_name'] == receiving_hospital
+                                    ].iloc[0].to_dict()
+                                    pdf_bytes = self.moh_service.generate_moh_referral_letter(
+                                        fresh_patient, ref_data, rec_data
+                                    )
+                                    if pdf_bytes:
+                                        st.download_button(
+                                            label="⬇️ Download MOH Referral Letter (PDF)",
+                                            data=pdf_bytes,
+                                            file_name=f"MOH_Referral_{patient.patient_id}_{datetime.utcnow().strftime('%Y%m%d')}.pdf",
+                                            mime="application/pdf",
+                                            key=f"moh_dl_{patient.patient_id}"
+                                        )
+                                        fresh_patient.referral_letter_generated = True
+                                        self.database.session.commit()
+                                        st.success("✅ MOH-standard referral letter generated with QR verification code.")
+                                except Exception as e:
+                                    st.error(f"Error generating referral letter: {e}")
+
         st.markdown("---")
         st.subheader("Pre-Referral Checks")
         tab_sha, tab_mews = st.tabs(["🏛️ SHA Member Verification", "📊 MEWS Calculator"])
@@ -1972,24 +2209,35 @@ class ReferralUI:
 
     def display_active_referrals(self):
         st.subheader("Active Referrals")
-        patients = self.db.get_all_patients()
+        patients = self.database.get_all_patients()
         user_hospital = st.session_state.user['hospital']
         if user_hospital == "All Facilities":
             active_patients = [p for p in patients if p.status not in ['Arrived at Destination', 'Completed']]
-        elif user_hospital in ["Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)", "Kisumu County Referral Hospital"]:
-            active_patients = [p for p in patients if p.receiving_hospital == user_hospital and p.status not in ['Arrived at Destination', 'Completed']]
+        elif user_hospital in [
+            "Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)",
+            "Kisumu County Referral Hospital"
+        ]:
+            active_patients = [
+                p for p in patients
+                if p.receiving_hospital == user_hospital
+                and p.status not in ['Arrived at Destination', 'Completed']
+            ]
         else:
-            active_patients = [p for p in patients if p.referring_hospital == user_hospital and p.status not in ['Arrived at Destination', 'Completed']]
+            active_patients = [
+                p for p in patients
+                if p.referring_hospital == user_hospital
+                and p.status not in ['Arrived at Destination', 'Completed']
+            ]
 
         if active_patients:
             data = []
             for patient in active_patients:
                 ambulance_info = ""
                 if patient.assigned_ambulance:
-                    ambulance_service = AmbulanceService(self.db)
-                    ambulance_data = ambulance_service.get_ambulance_with_fuel_info(patient.assigned_ambulance)
-                    if ambulance_data:
-                        ambulance_info = f"{patient.assigned_ambulance} ({ambulance_data['fuel_status']})"
+                    amb_svc = AmbulanceService(self.database)
+                    amb_data = amb_svc.get_ambulance_with_fuel_info(patient.assigned_ambulance)
+                    if amb_data:
+                        ambulance_info = f"{patient.assigned_ambulance} ({amb_data['fuel_status']})"
                 triage_icon = {'Red': '🔴', 'Orange': '🟠', 'Green': '🟢'}.get(patient.triage_level, '⚪')
                 data.append({
                     'Patient ID': patient.patient_id,
@@ -2004,9 +2252,7 @@ class ReferralUI:
                     'Claim': patient.sha_claim_id or 'None',
                     'Ambulance': ambulance_info or 'Not assigned'
                 })
-            df = pd.DataFrame(data)
-            st.dataframe(df, use_container_width=True)
-
+            st.dataframe(pd.DataFrame(data), use_container_width=True)
             st.subheader("Patient Actions")
             for patient in active_patients:
                 triage_icon = {'Red': '🔴', 'Orange': '🟠', 'Green': '🟢'}.get(patient.triage_level, '⚪')
@@ -2022,10 +2268,15 @@ class ReferralUI:
             if st.button(f"Assign Ambulance", key=f"assign_{patient.patient_id}", use_container_width=True):
                 st.session_state[f'assign_ambulance_{patient.patient_id}'] = True
             if st.session_state.get(f'assign_ambulance_{patient.patient_id}'):
-                available_ambulances = self.db.get_available_ambulances()
+                available_ambulances = self.database.get_available_ambulances()
                 if available_ambulances:
-                    ambulance_options = [f"{amb.ambulance_id} - {amb.driver_name} (Fuel: {amb.fuel_level:.1f}%)" for amb in available_ambulances]
-                    selected_ambulance = st.selectbox("Select Ambulance", ambulance_options, key=f"amb_select_{patient.patient_id}")
+                    ambulance_options = [
+                        f"{amb.ambulance_id} - {amb.driver_name} (Fuel: {amb.fuel_level:.1f}%)"
+                        for amb in available_ambulances
+                    ]
+                    selected_ambulance = st.selectbox(
+                        "Select Ambulance", ambulance_options, key=f"amb_select_{patient.patient_id}"
+                    )
                     if st.button("Confirm Assignment", key=f"confirm_{patient.patient_id}", use_container_width=True):
                         ambulance_id = selected_ambulance.split(" - ")[0]
                         if self.referral_service.assign_ambulance(patient.patient_id, ambulance_id):
@@ -2039,15 +2290,19 @@ class ReferralUI:
             if st.button("Update Status", key=f"status_{patient.patient_id}", use_container_width=True):
                 st.session_state[f'update_status_{patient.patient_id}'] = True
             if st.session_state.get(f'update_status_{patient.patient_id}'):
-                new_status = st.selectbox("New Status",
+                new_status = st.selectbox(
+                    "New Status",
                     ["Referred", "Ambulance Dispatched", "Patient Picked Up",
                      "Transporting to Destination", "Arrived at Destination"],
-                    key=f"status_select_{patient.patient_id}")
+                    key=f"status_select_{patient.patient_id}"
+                )
                 if st.button("Update", key=f"update_{patient.patient_id}", use_container_width=True):
                     patient.status = new_status
-                    self.db.session.commit()
-                    self.db.log_action(st.session_state.user['role'], st.session_state.user['role'],
-                                       'UPDATE_STATUS', 'Patient', patient.patient_id, f"New status: {new_status}")
+                    self.database.session.commit()
+                    self.database.log_action(
+                        st.session_state.user['role'], st.session_state.user['role'],
+                        'UPDATE_STATUS', 'Patient', patient.patient_id, f"New status: {new_status}"
+                    )
                     st.success("Status updated!")
                     st.session_state[f'update_status_{patient.patient_id}'] = False
                     st.rerun()
@@ -2065,23 +2320,33 @@ class ReferralUI:
                     st.rerun()
 
         with col4:
-            # GAP 5: Download MOH referral letter for existing patients
-            if st.button("📄 MOH Letter", key=f"moh_{patient.patient_id}", use_container_width=True):
-                try:
-                    ref_data = hospitals_df[hospitals_df['facility_name'] == patient.referring_hospital].iloc[0].to_dict()
-                    rec_data = hospitals_df[hospitals_df['facility_name'] == patient.receiving_hospital].iloc[0].to_dict()
-                    ambulance = self.db.session.query(Ambulance).filter(
-                        Ambulance.ambulance_id == patient.assigned_ambulance).first() if patient.assigned_ambulance else None
-                    pdf_bytes = self.moh_service.generate_moh_referral_letter(patient, ref_data, rec_data, ambulance)
-                    st.download_button(
-                        label="⬇️ Download PDF",
-                        data=pdf_bytes,
-                        file_name=f"MOH_{patient.patient_id}.pdf",
-                        mime="application/pdf",
-                        key=f"moh_dl2_{patient.patient_id}"
-                    )
-                except Exception as e:
-                    st.error(f"Error: {e}")
+            if REPORTLAB_AVAILABLE:
+                if st.button("📄 MOH Letter", key=f"moh_{patient.patient_id}", use_container_width=True):
+                    try:
+                        ref_data = hospitals_df[
+                            hospitals_df['facility_name'] == patient.referring_hospital
+                        ].iloc[0].to_dict()
+                        rec_data = hospitals_df[
+                            hospitals_df['facility_name'] == patient.receiving_hospital
+                        ].iloc[0].to_dict()
+                        ambulance = None
+                        if patient.assigned_ambulance:
+                            ambulance = self.database.session.query(Ambulance).filter(
+                                Ambulance.ambulance_id == patient.assigned_ambulance
+                            ).first()
+                        pdf_bytes = self.moh_service.generate_moh_referral_letter(
+                            patient, ref_data, rec_data, ambulance
+                        )
+                        if pdf_bytes:
+                            st.download_button(
+                                label="⬇️ Download PDF",
+                                data=pdf_bytes,
+                                file_name=f"MOH_{patient.patient_id}.pdf",
+                                mime="application/pdf",
+                                key=f"moh_dl2_{patient.patient_id}"
+                            )
+                    except Exception as e:
+                        st.error(f"Error: {e}")
 
         with col5:
             if (st.session_state.user['role'] == 'Ambulance Driver' and
@@ -2092,11 +2357,14 @@ class ReferralUI:
 
     def display_referral_history(self):
         st.subheader("Referral History")
-        patients = self.db.get_all_patients()
+        patients = self.database.get_all_patients()
         user_hospital = st.session_state.user['hospital']
         if user_hospital == "All Facilities":
             filtered_patients = patients
-        elif user_hospital in ["Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)", "Kisumu County Referral Hospital"]:
+        elif user_hospital in [
+            "Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)",
+            "Kisumu County Referral Hospital"
+        ]:
             filtered_patients = [p for p in patients if p.receiving_hospital == user_hospital]
         else:
             filtered_patients = [p for p in patients if p.referring_hospital == user_hospital]
@@ -2106,10 +2374,13 @@ class ReferralUI:
             for patient in filtered_patients:
                 triage_icon = {'Red': '🔴', 'Orange': '🟠', 'Green': '🟢'}.get(patient.triage_level, '⚪')
                 data.append({
-                    'Patient ID': patient.patient_id, 'Name': patient.name,
+                    'Patient ID': patient.patient_id,
+                    'Name': patient.name,
                     'Triage': f"{triage_icon} {patient.triage_level or 'N/A'}",
-                    'Condition': patient.condition, 'From': patient.referring_hospital,
-                    'To': patient.receiving_hospital, 'Status': patient.status,
+                    'Condition': patient.condition,
+                    'From': patient.referring_hospital,
+                    'To': patient.receiving_hospital,
+                    'Status': patient.status,
                     'SHA': '✅' if patient.sha_verified else '❌',
                     'SHA Claim': patient.sha_claim_id or 'None',
                     'Billing (KSh)': f"{patient.sha_billing_amount_kes:,.2f}" if patient.sha_billing_amount_kes else 'N/A',
@@ -2122,10 +2393,12 @@ class ReferralUI:
             st.info("No referral history")
 
 
+# =============================================================================
+# TRACKING UI
+# =============================================================================
 class TrackingUI:
-    def __init__(self, db):
-        self.db = db
-        self.map_utils = MapUtils()
+    def __init__(self, database):
+        self.database = database
 
     def display(self):
         st.title("🚑 Live Ambulance Tracking")
@@ -2135,8 +2408,11 @@ class TrackingUI:
                 st.rerun()
 
         st.markdown("### 🗺️ Real-time Ambulance Tracking")
-        patients = self.db.get_all_patients()
-        active_transfers = [p for p in patients if p.status in ['Ambulance Dispatched', 'Patient Picked Up', 'Transporting to Destination']]
+        patients = self.database.get_all_patients()
+        active_transfers = [
+            p for p in patients
+            if p.status in ['Ambulance Dispatched', 'Patient Picked Up', 'Transporting to Destination']
+        ]
 
         if active_transfers:
             for patient in active_transfers:
@@ -2144,18 +2420,23 @@ class TrackingUI:
                 with st.expander(f"{triage_icon} {patient.name} — {patient.condition}", expanded=True):
                     ambulance = None
                     if patient.assigned_ambulance:
-                        ambulance = self.db.session.query(Ambulance).filter(
-                            Ambulance.ambulance_id == patient.assigned_ambulance).first()
-                    self.map_utils.create_real_time_tracking_map(patient, ambulance, hospitals_df)
+                        ambulance = self.database.session.query(Ambulance).filter(
+                            Ambulance.ambulance_id == patient.assigned_ambulance
+                        ).first()
+                    MapUtils.create_real_time_tracking_map(patient, ambulance, hospitals_df)
 
                     st.subheader("📢 Notification Status")
                     col_not1, col_not2 = st.columns(2)
                     with col_not1:
-                        st.metric("Pickup Notification to Driver", "✅ Sent" if patient.pickup_notification_sent else "⏳ Pending")
+                        st.metric(
+                            "Pickup Notification to Driver",
+                            "✅ Sent" if patient.pickup_notification_sent else "⏳ Pending"
+                        )
                     with col_not2:
-                        st.metric("Enroute Notification to Hospital", "✅ Sent" if patient.enroute_notification_sent else "⏳ Pending")
-
-                    # GAP 4: FHIR export from tracking view
+                        st.metric(
+                            "Enroute Notification to Hospital",
+                            "✅ Sent" if patient.enroute_notification_sent else "⏳ Pending"
+                        )
                     if ambulance:
                         FHIRService.render_fhir_panel(patient, ambulance)
         else:
@@ -2165,11 +2446,14 @@ class TrackingUI:
         self.display_ambulance_list()
 
     def display_ambulance_list(self):
-        ambulances = self.db.get_all_ambulances()
+        ambulances = self.database.get_all_ambulances()
         for ambulance in ambulances:
             status_color = "🟢" if ambulance.status == 'Available' else "🔴"
             fuel_indicator = "🟢" if ambulance.fuel_level > 50 else "🟡" if ambulance.fuel_level > 20 else "🔴"
-            with st.expander(f"{status_color} {ambulance.ambulance_id} — {ambulance.driver_name} {fuel_indicator} Fuel: {ambulance.fuel_level:.1f}%"):
+            with st.expander(
+                f"{status_color} {ambulance.ambulance_id} — {ambulance.driver_name} "
+                f"{fuel_indicator} Fuel: {ambulance.fuel_level:.1f}%"
+            ):
                 col1, col2 = st.columns(2)
                 with col1:
                     st.write(f"**Status:** {ambulance.status}")
@@ -2178,17 +2462,19 @@ class TrackingUI:
                 with col2:
                     st.write(f"**Fuel Level:** {ambulance.fuel_level:.1f}%")
                     if ambulance.current_patient:
-                        patient = self.db.get_patient_by_id(ambulance.current_patient)
+                        patient = self.database.get_patient_by_id(ambulance.current_patient)
                         if patient:
                             st.write(f"**Current Patient:** {patient.name}")
                             st.write(f"**Destination:** {patient.receiving_hospital}")
 
 
-# GAP 2: New SHA Billing UI tab
+# =============================================================================
+# SHA BILLING UI
+# =============================================================================
 class SHABillingUI:
-    def __init__(self, db):
-        self.db = db
-        self.sha_service = SHABillingService(db)
+    def __init__(self, database):
+        self.database = database
+        self.sha_service = SHABillingService(database)
 
     def display(self):
         st.title("🏛️ SHA / SHIF Billing & Insurance")
@@ -2202,7 +2488,7 @@ class SHABillingUI:
 
     def display_claims(self):
         st.subheader("Submitted SHA Claims")
-        claims = self.db.get_sha_claims()
+        claims = self.database.get_sha_claims()
         if claims:
             total_billed = sum(c.total_amount for c in claims)
             approved = [c for c in claims if c.status == 'Approved']
@@ -2210,17 +2496,22 @@ class SHABillingUI:
             col1.metric("Total Claims", len(claims))
             col2.metric("Total Billed (KSh)", f"{total_billed:,.2f}")
             col3.metric("Approved", len(approved))
-            data = [{'Claim ID': c.claim_id, 'Patient ID': c.patient_id, 'Ambulance': c.ambulance_id,
-                     'Distance (km)': c.distance_km, 'Base (KSh)': c.base_charge,
-                     'Additional (KSh)': c.additional_charge, 'Total (KSh)': c.total_amount,
-                     'Status': c.status, 'Submitted': c.submitted_at.strftime('%Y-%m-%d %H:%M')} for c in claims]
+            data = [{
+                'Claim ID': c.claim_id, 'Patient ID': c.patient_id, 'Ambulance': c.ambulance_id,
+                'Distance (km)': c.distance_km, 'Base (KSh)': c.base_charge,
+                'Additional (KSh)': c.additional_charge, 'Total (KSh)': c.total_amount,
+                'Status': c.status, 'Submitted': c.submitted_at.strftime('%Y-%m-%d %H:%M')
+            } for c in claims]
             st.dataframe(pd.DataFrame(data), use_container_width=True)
         else:
-            st.info("No SHA claims submitted yet. Claims are auto-created when referrals with ambulances are dispatched.")
+            st.info("No SHA claims submitted yet.")
 
     def display_tariff_calculator(self):
         st.subheader("SHA Ambulance Tariff Calculator")
-        st.info(f"Official tariff: KSh {Config.SHA_BASE_CHARGE_KES:,.0f} for first {Config.SHA_BASE_DISTANCE_KM:.0f} km, then KSh {Config.SHA_PER_KM_CHARGE_KES:.0f}/km")
+        st.info(
+            f"Official tariff: KSh {Config.SHA_BASE_CHARGE_KES:,.0f} for first "
+            f"{Config.SHA_BASE_DISTANCE_KM:.0f} km, then KSh {Config.SHA_PER_KM_CHARGE_KES:.0f}/km"
+        )
         distance = st.slider("Distance (km)", min_value=1, max_value=200, value=30, step=1)
         billing = self.sha_service.calculate_billing(distance)
         col1, col2, col3 = st.columns(3)
@@ -2232,19 +2523,23 @@ class SHABillingUI:
     def display_sha_members(self):
         st.subheader("Demo SHA Member Registry")
         st.info("In production, this connects to the SHA national member database API. Demo members for testing:")
-        members = self.db.session.query(SHAMember).all()
+        members = self.database.session.query(SHAMember).all()
         if members:
-            data = [{'SHA Number': m.sha_member_number, 'National ID': m.national_id,
-                     'Name': m.member_name, 'Cover': m.cover_type,
-                     'Active': '✅' if m.active else '❌'} for m in members]
+            data = [{
+                'SHA Number': m.sha_member_number, 'National ID': m.national_id,
+                'Name': m.member_name, 'Cover': m.cover_type,
+                'Active': '✅' if m.active else '❌'
+            } for m in members]
             st.dataframe(pd.DataFrame(data), use_container_width=True)
 
 
-# GAP 3: New Bed Management UI tab
+# =============================================================================
+# BED MANAGEMENT UI
+# =============================================================================
 class BedManagementUI:
-    def __init__(self, db):
-        self.db = db
-        self.bed_service = BedCapacityService(db)
+    def __init__(self, database):
+        self.database = database
+        self.bed_service = BedCapacityService(database)
 
     def display(self):
         st.title("🏥 Hospital Bed & Capacity Management")
@@ -2254,37 +2549,51 @@ class BedManagementUI:
             st.markdown("---")
             self.display_capacity_chart()
         with tab2:
-            self.bed_service.render_capacity_update_form(self.db, st.session_state.user)
+            self.bed_service.render_capacity_update_form(self.database, st.session_state.user)
 
     def display_capacity_chart(self):
-        capacities = self.db.get_all_bed_capacities()
+        if not PLOTLY_AVAILABLE:
+            return
+        capacities = self.database.get_all_bed_capacities()
         if capacities:
             data = []
             for c in capacities:
                 short_name = c.hospital_name.split('(')[0].strip()[:30]
                 if c.total_beds > 0:
-                    data.append({'Hospital': short_name, 'Occupied': c.occupied_beds,
-                                 'Available': c.total_beds - c.occupied_beds, 'Total': c.total_beds})
+                    data.append({
+                        'Hospital': short_name,
+                        'Occupied': c.occupied_beds,
+                        'Available': c.total_beds - c.occupied_beds,
+                        'Total': c.total_beds
+                    })
             if data:
                 df = pd.DataFrame(data)
-                fig = px.bar(df, x='Hospital', y=['Occupied', 'Available'], title='Bed Occupancy by Hospital',
-                             color_discrete_map={'Occupied': '#E24B4A', 'Available': '#639922'}, barmode='stack')
+                fig = px.bar(
+                    df, x='Hospital', y=['Occupied', 'Available'],
+                    title='Bed Occupancy by Hospital',
+                    color_discrete_map={'Occupied': '#E24B4A', 'Available': '#639922'},
+                    barmode='stack'
+                )
                 st.plotly_chart(fig, use_container_width=True, key="bed_chart")
 
 
-# GAP 4: Audit Log UI
+# =============================================================================
+# AUDIT LOG UI
+# =============================================================================
 class AuditLogUI:
-    def __init__(self, db):
-        self.db = db
+    def __init__(self, database):
+        self.database = database
 
     def display(self):
         st.title("🔍 Audit Log — Kenya Data Protection Act 2019 Compliance")
         st.info("All user actions on patient data are logged here in compliance with Kenya's Data Protection Act 2019.")
-        logs = self.db.get_audit_logs(limit=200)
+        logs = self.database.get_audit_logs(limit=200)
         if logs:
-            data = [{'Timestamp': l.timestamp.strftime('%Y-%m-%d %H:%M:%S'), 'User': l.user_id,
-                     'Role': l.user_role, 'Action': l.action, 'Resource': l.resource_type,
-                     'Record ID': l.resource_id, 'Details': l.details} for l in logs]
+            data = [{
+                'Timestamp': l.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+                'User': l.user_id, 'Role': l.user_role, 'Action': l.action,
+                'Resource': l.resource_type, 'Record ID': l.resource_id, 'Details': l.details
+            } for l in logs]
             df = pd.DataFrame(data)
             search = st.text_input("Filter logs (by user, action, resource)...")
             if search:
@@ -2292,16 +2601,21 @@ class AuditLogUI:
                 df = df[mask]
             st.dataframe(df, use_container_width=True)
             csv = df.to_csv(index=False)
-            st.download_button("⬇️ Export Audit Log (CSV)", data=csv,
-                               file_name=f"audit_log_{datetime.utcnow().strftime('%Y%m%d')}.csv", mime="text/csv")
+            st.download_button(
+                "⬇️ Export Audit Log (CSV)", data=csv,
+                file_name=f"audit_log_{datetime.utcnow().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
         else:
-            st.info("No audit records yet. Logs are created when referrals, status updates, and capacity changes occur.")
+            st.info("No audit records yet.")
 
 
-# Unchanged UI classes
+# =============================================================================
+# HANDOVER UI
+# =============================================================================
 class HandoverUI:
-    def __init__(self, db):
-        self.db = db
+    def __init__(self, database):
+        self.database = database
         self.moh_service = MOHReferralLetterService()
 
     def display(self):
@@ -2314,12 +2628,15 @@ class HandoverUI:
 
     def create_handover_form(self):
         st.subheader("Create Handover Form")
-        patients = self.db.get_all_patients()
+        patients = self.database.get_all_patients()
         user_hospital = st.session_state.user['hospital']
         if user_hospital == "All Facilities":
             eligible_patients = [p for p in patients if p.status == 'Arrived at Destination']
         else:
-            eligible_patients = [p for p in patients if p.receiving_hospital == user_hospital and p.status == 'Arrived at Destination']
+            eligible_patients = [
+                p for p in patients
+                if p.receiving_hospital == user_hospital and p.status == 'Arrived at Destination'
+            ]
 
         if not eligible_patients:
             st.info("No patients eligible for handover (must have status 'Arrived at Destination')")
@@ -2333,8 +2650,12 @@ class HandoverUI:
             st.write(f"**Patient:** {selected_patient.name}")
             st.write(f"**Condition:** {selected_patient.condition}")
             triage_icon = {'Red': '🔴', 'Orange': '🟠', 'Green': '🟢'}.get(selected_patient.triage_level, '⚪')
-            st.write(f"**Triage:** {triage_icon} {selected_patient.triage_level or 'N/A'} (MEWS: {selected_patient.mews_score or 0})")
+            st.write(
+                f"**Triage:** {triage_icon} {selected_patient.triage_level or 'N/A'} "
+                f"(MEWS: {selected_patient.mews_score or 0})"
+            )
             st.write(f"**SHA Claim:** {selected_patient.sha_claim_id or 'None'}")
+
             st.subheader("Vital Signs at Handover")
             col1, col2 = st.columns(2)
             with col1:
@@ -2347,10 +2668,6 @@ class HandoverUI:
             st.subheader("Handover Details")
             receiving_physician = st.text_input("Receiving Physician*")
             handover_notes = st.text_area("Handover Notes")
-            with st.expander("Additional Information"):
-                condition_changes = st.text_area("Condition Changes During Transfer")
-                interventions = st.text_area("Interventions During Transfer")
-                medications_administered = st.text_area("Medications Administered")
 
             submitted = st.form_submit_button("Complete Handover", use_container_width=True)
             if submitted:
@@ -2358,59 +2675,81 @@ class HandoverUI:
                     st.error("Please enter the receiving physician")
                 else:
                     handover_data = {
-                        'patient_id': selected_patient.patient_id, 'patient_name': selected_patient.name,
-                        'age': selected_patient.age, 'condition': selected_patient.condition,
+                        'patient_id': selected_patient.patient_id,
+                        'patient_name': selected_patient.name,
+                        'age': selected_patient.age,
+                        'condition': selected_patient.condition,
                         'referring_hospital': selected_patient.referring_hospital,
                         'receiving_hospital': selected_patient.receiving_hospital,
                         'referring_physician': selected_patient.referring_physician,
                         'receiving_physician': receiving_physician,
-                        'vital_signs': {'blood_pressure': blood_pressure, 'heart_rate': heart_rate,
-                                        'temperature': temperature, 'oxygen_saturation': oxygen_saturation},
+                        'vital_signs': {
+                            'blood_pressure': blood_pressure,
+                            'heart_rate': heart_rate,
+                            'temperature': temperature,
+                            'oxygen_saturation': oxygen_saturation
+                        },
                         'medical_history': selected_patient.medical_history,
                         'current_medications': selected_patient.current_medications,
-                        'allergies': selected_patient.allergies, 'notes': handover_notes,
+                        'allergies': selected_patient.allergies,
+                        'notes': handover_notes,
                         'ambulance_id': selected_patient.assigned_ambulance,
                         'created_by': st.session_state.user['role']
                     }
-                    handover = self.db.add_handover_form(handover_data)
+                    self.database.add_handover_form(handover_data)
                     selected_patient.status = 'Completed'
                     selected_patient.receiving_physician = receiving_physician
 
-                    # Update SHA claim status
                     if selected_patient.sha_claim_id:
-                        claim = self.db.session.query(SHAClaim).filter(
-                            SHAClaim.claim_id == selected_patient.sha_claim_id).first()
+                        claim = self.database.session.query(SHAClaim).filter(
+                            SHAClaim.claim_id == selected_patient.sha_claim_id
+                        ).first()
                         if claim:
                             claim.status = 'Approved'
                             claim.approved_at = datetime.utcnow()
                             selected_patient.sha_claim_status = 'Approved'
 
-                    self.db.session.commit()
-                    self.db.log_action(st.session_state.user['role'], st.session_state.user['role'],
-                                       'COMPLETE_HANDOVER', 'Patient', selected_patient.patient_id, 'Handover completed')
+                    self.database.session.commit()
+                    self.database.log_action(
+                        st.session_state.user['role'], st.session_state.user['role'],
+                        'COMPLETE_HANDOVER', 'Patient', selected_patient.patient_id, 'Handover completed'
+                    )
                     st.success("Handover completed successfully!")
                     st.balloons()
 
-                    # Offer final MOH letter with receiving physician filled in
-                    try:
-                        ref_data = hospitals_df[hospitals_df['facility_name'] == selected_patient.referring_hospital].iloc[0].to_dict()
-                        rec_data = hospitals_df[hospitals_df['facility_name'] == selected_patient.receiving_hospital].iloc[0].to_dict()
-                        pdf_bytes = self.moh_service.generate_moh_referral_letter(selected_patient, ref_data, rec_data)
-                        st.download_button("⬇️ Download Completed MOH Referral Letter", data=pdf_bytes,
-                                           file_name=f"MOH_Completed_{selected_patient.patient_id}.pdf",
-                                           mime="application/pdf", key=f"moh_handover_{selected_patient.patient_id}")
-                    except Exception as e:
-                        st.warning(f"Could not generate final letter: {e}")
+                    if REPORTLAB_AVAILABLE:
+                        try:
+                            ref_data = hospitals_df[
+                                hospitals_df['facility_name'] == selected_patient.referring_hospital
+                            ].iloc[0].to_dict()
+                            rec_data = hospitals_df[
+                                hospitals_df['facility_name'] == selected_patient.receiving_hospital
+                            ].iloc[0].to_dict()
+                            pdf_bytes = self.moh_service.generate_moh_referral_letter(
+                                selected_patient, ref_data, rec_data
+                            )
+                            if pdf_bytes:
+                                st.download_button(
+                                    "⬇️ Download Completed MOH Referral Letter",
+                                    data=pdf_bytes,
+                                    file_name=f"MOH_Completed_{selected_patient.patient_id}.pdf",
+                                    mime="application/pdf",
+                                    key=f"moh_handover_{selected_patient.patient_id}"
+                                )
+                        except Exception as e:
+                            st.warning(f"Could not generate final letter: {e}")
 
     def display_handover_history(self):
         st.subheader("Handover History")
-        handovers = self.db.session.query(HandoverForm).all()
+        handovers = self.database.session.query(HandoverForm).all()
         user_hospital = st.session_state.user['hospital']
         if user_hospital != "All Facilities":
             handovers = [h for h in handovers if h.receiving_hospital == user_hospital]
         if handovers:
             for handover in handovers:
-                with st.expander(f"{handover.patient_name} — {handover.transfer_time.strftime('%Y-%m-%d %H:%M')}"):
+                with st.expander(
+                    f"{handover.patient_name} — {handover.transfer_time.strftime('%Y-%m-%d %H:%M')}"
+                ):
                     col1, col2 = st.columns(2)
                     with col1:
                         st.write(f"**Patient ID:** {handover.patient_id}")
@@ -2425,20 +2764,23 @@ class HandoverUI:
                         st.write(f"**Handover Time:** {handover.transfer_time.strftime('%Y-%m-%d %H:%M')}")
                     if handover.vital_signs:
                         vitals = handover.vital_signs
-                        col1, col2, col3, col4 = st.columns(4)
-                        with col1: st.metric("BP", vitals.get('blood_pressure', 'N/A'))
-                        with col2: st.metric("HR", f"{vitals.get('heart_rate', 'N/A')} bpm")
-                        with col3: st.metric("Temp", f"{vitals.get('temperature', 'N/A')}°C")
-                        with col4: st.metric("SpO₂", f"{vitals.get('oxygen_saturation', 'N/A')}%")
+                        c1, c2, c3, c4 = st.columns(4)
+                        with c1: st.metric("BP", vitals.get('blood_pressure', 'N/A'))
+                        with c2: st.metric("HR", f"{vitals.get('heart_rate', 'N/A')} bpm")
+                        with c3: st.metric("Temp", f"{vitals.get('temperature', 'N/A')}°C")
+                        with c4: st.metric("SpO₂", f"{vitals.get('oxygen_saturation', 'N/A')}%")
                     if handover.notes:
                         st.write(f"**Handover Notes:** {handover.notes}")
         else:
             st.info("No handover forms completed")
 
 
+# =============================================================================
+# COMMUNICATION UI
+# =============================================================================
 class CommunicationUI:
-    def __init__(self, db, notification_service):
-        self.db = db
+    def __init__(self, database, notification_service):
+        self.database = database
         self.notification_service = notification_service
 
     def display(self):
@@ -2454,17 +2796,22 @@ class CommunicationUI:
     def send_notifications(self):
         st.subheader("Send Notifications")
         with st.form("notification_form"):
-            notification_type = st.selectbox("Notification Type",
-                ["Referral Alert", "Ambulance Dispatch", "Patient Arrival", "Emergency", "General Update"])
+            notification_type = st.selectbox(
+                "Notification Type",
+                ["Referral Alert", "Ambulance Dispatch", "Patient Arrival", "Emergency", "General Update"]
+            )
             recipient_type = st.radio("Recipient", ["Hospital", "Ambulance Driver", "Specific Contact"])
             if recipient_type == "Hospital":
-                recipient = st.selectbox("Select Hospital",
-                    ["Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)",
-                     "Kisumu County Referral Hospital", "Lumumba Sub-County Hospital", "All Hospitals"])
+                recipient = st.selectbox("Select Hospital", [
+                    "Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)",
+                    "Kisumu County Referral Hospital", "Lumumba Sub-County Hospital", "All Hospitals"
+                ])
             elif recipient_type == "Ambulance Driver":
-                ambulances = self.db.get_all_ambulances()
-                recipient = st.selectbox("Select Driver",
-                    [f"{amb.ambulance_id} - {amb.driver_name}" for amb in ambulances])
+                ambulances = self.database.get_all_ambulances()
+                recipient = st.selectbox(
+                    "Select Driver",
+                    [f"{amb.ambulance_id} - {amb.driver_name}" for amb in ambulances]
+                )
             else:
                 recipient = st.text_input("Contact Number/Email")
             subject = st.text_input("Subject", value=f"{notification_type} Notification")
@@ -2478,32 +2825,38 @@ class CommunicationUI:
                 if not message:
                     st.error("Please enter a message")
                 else:
-                    if send_sms: st.success("📱 SMS notification prepared for sending")
-                    if send_email_chk: st.success("📧 Email notification prepared for sending")
-                    if urgent: st.warning("🚨 URGENT notification marked")
+                    if send_sms:
+                        st.success("📱 SMS notification prepared for sending")
+                    if send_email_chk:
+                        st.success("📧 Email notification prepared for sending")
+                    if urgent:
+                        st.warning("🚨 URGENT notification marked")
                     st.info(f"Notification will be sent to: {recipient}")
 
     def message_templates(self):
         st.subheader("Message Templates")
         templates = {
-            "New Referral": "New patient referral received: {patient_name} with {condition}. Triage: {triage}. Please prepare for arrival.",
-            "Ambulance Dispatch": "Ambulance {ambulance_id} dispatched for patient {patient_name}. ETA: {eta} minutes. SHA Claim: {claim_id}.",
+            "New Referral": "New patient referral received: {patient_name} with {condition}. Triage: {triage}.",
+            "Ambulance Dispatch": "Ambulance {ambulance_id} dispatched for patient {patient_name}. ETA: {eta} minutes.",
             "Patient Arrival": "Patient {patient_name} has arrived at {hospital}. Condition: {condition}.",
             "Emergency": "EMERGENCY: {message}. Immediate response required.",
-            "Status Update": "Patient {patient_name} status update: {status}. Current location: {location}."
+            "Status Update": "Patient {patient_name} status update: {status}. Location: {location}."
         }
         selected_template = st.selectbox("Select Template", list(templates.keys()))
         st.text_area("Template Content", templates[selected_template], height=100)
-        custom_message = st.text_area("Customize Message", templates[selected_template], height=100)
         if st.button("Save as New Template", use_container_width=True):
             st.success("Template saved successfully!")
 
     def communication_log(self):
         st.subheader("Communication Log")
-        all_comms = self.db.session.query(Communication).order_by(Communication.timestamp.desc()).limit(50).all()
+        all_comms = self.database.session.query(Communication).order_by(
+            Communication.timestamp.desc()
+        ).limit(50).all()
         if all_comms:
             for comm in all_comms:
-                with st.expander(f"{comm.timestamp.strftime('%Y-%m-%d %H:%M')} — {comm.message_type} to {comm.receiver}"):
+                with st.expander(
+                    f"{comm.timestamp.strftime('%Y-%m-%d %H:%M')} — {comm.message_type} to {comm.receiver}"
+                ):
                     st.write(f"**From:** {comm.sender}")
                     st.write(f"**Message:** {comm.message}")
                     st.write(f"**Patient ID:** {comm.patient_id}")
@@ -2511,15 +2864,20 @@ class CommunicationUI:
             st.info("No communications logged yet.")
 
 
+# =============================================================================
+# REPORTS UI
+# =============================================================================
 class ReportsUI:
-    def __init__(self, db, analytics):
-        self.db = db
+    def __init__(self, database, analytics):
+        self.database = database
         self.analytics = analytics
-        self.pdf_exporter = PDFExporter()
 
     def display(self):
         st.title("📈 Reports & Analytics")
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["Performance Metrics", "Hospital Analytics", "Ambulance Reports", "SHA Billing Report", "Export Data"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "Performance Metrics", "Hospital Analytics",
+            "Ambulance Reports", "SHA Billing Report", "Export Data"
+        ])
         with tab1: self.performance_metrics()
         with tab2: self.hospital_analytics()
         with tab3: self.ambulance_reports()
@@ -2528,9 +2886,6 @@ class ReportsUI:
 
     def performance_metrics(self):
         st.subheader("Performance Metrics")
-        col1, col2 = st.columns(2)
-        with col1: start_date = st.date_input("Start Date", datetime.now() - timedelta(days=30))
-        with col2: end_date = st.date_input("End Date", datetime.now())
         kpis = self.analytics.get_kpis()
         col1, col2, col3, col4 = st.columns(4)
         with col1: st.metric("Total Referrals", kpis['total_referrals'])
@@ -2538,60 +2893,66 @@ class ReportsUI:
         with col3: st.metric("Avg Response Time", kpis['avg_response_time'])
         with col4: st.metric("Active Transfers", kpis['active_referrals'])
 
-        st.subheader("Triage Level Distribution")
-        patients = self.db.get_all_patients()
-        if patients:
-            triage_counts = {'Red': 0, 'Orange': 0, 'Green': 0}
-            for p in patients:
-                lvl = p.triage_level or 'Green'
-                triage_counts[lvl] = triage_counts.get(lvl, 0) + 1
-            fig = px.pie(values=list(triage_counts.values()), names=list(triage_counts.keys()),
-                         title="Referrals by Triage Level",
-                         color_discrete_map={'Red': '#E24B4A', 'Orange': '#EF9F27', 'Green': '#639922'})
-            st.plotly_chart(fig, use_container_width=True, key="triage_pie")
+        if PLOTLY_AVAILABLE:
+            patients = self.database.get_all_patients()
+            if patients:
+                triage_counts = {'Red': 0, 'Orange': 0, 'Green': 0}
+                for p in patients:
+                    lvl = p.triage_level or 'Green'
+                    triage_counts[lvl] = triage_counts.get(lvl, 0) + 1
+                fig = px.pie(
+                    values=list(triage_counts.values()),
+                    names=list(triage_counts.keys()),
+                    title="Referrals by Triage Level",
+                    color_discrete_map={'Red': '#E24B4A', 'Orange': '#EF9F27', 'Green': '#639922'}
+                )
+                st.plotly_chart(fig, use_container_width=True, key="triage_pie")
 
-        trends = self.analytics.get_referral_trends()
-        if not trends.empty:
-            fig = px.line(trends, x='date', y='count', title="Daily Referral Trends")
-            st.plotly_chart(fig, use_container_width=True, key="response_time_chart")
-
-        if patients:
-            conditions = [p.condition for p in patients]
-            condition_counts = pd.Series(conditions).value_counts()
-            fig = px.pie(values=condition_counts.values, names=condition_counts.index, title="Referral Reasons Distribution")
-            st.plotly_chart(fig, use_container_width=True, key="referral_reasons_chart")
+            trends = self.analytics.get_referral_trends()
+            if not trends.empty:
+                fig = px.line(trends, x='date', y='count', title="Daily Referral Trends")
+                st.plotly_chart(fig, use_container_width=True, key="response_time_chart")
 
     def hospital_analytics(self):
         st.subheader("Hospital Performance")
+        if not PLOTLY_AVAILABLE:
+            st.info("Plotly not available.")
+            return
         hospitals_stats = self.analytics.get_hospital_stats()
         if not hospitals_stats.empty:
             hospital_referrals = hospitals_stats.groupby('hospital')['count'].sum().reset_index()
             fig = px.bar(hospital_referrals, x='hospital', y='count', title="Total Referrals by Hospital")
             st.plotly_chart(fig, use_container_width=True, key="hospital_referrals_chart")
-            fig = px.sunburst(hospitals_stats, path=['hospital', 'status'], values='count', title="Referral Status by Hospital")
-            st.plotly_chart(fig, use_container_width=True, key="hospital_status_chart")
         else:
             st.info("No hospital data available")
 
     def ambulance_reports(self):
         st.subheader("Ambulance Utilization")
-        ambulances = self.db.get_all_ambulances()
+        ambulances = self.database.get_all_ambulances()
         if ambulances:
-            status_counts = {}
-            for ambulance in ambulances:
-                status_counts[ambulance.status] = status_counts.get(ambulance.status, 0) + 1
-            fig = px.pie(values=list(status_counts.values()), names=list(status_counts.keys()), title="Ambulance Status Distribution")
-            st.plotly_chart(fig, use_container_width=True, key="ambulance_status_pie_chart")
-            ambulance_data = [{'Ambulance ID': a.ambulance_id, 'Driver': a.driver_name,
-                               'Status': a.status, 'Fuel %': f"{a.fuel_level:.1f}",
-                               'Current Patient': a.current_patient or 'None', 'Location': a.current_location} for a in ambulances]
+            if PLOTLY_AVAILABLE:
+                status_counts = {}
+                for ambulance in ambulances:
+                    status_counts[ambulance.status] = status_counts.get(ambulance.status, 0) + 1
+                fig = px.pie(
+                    values=list(status_counts.values()),
+                    names=list(status_counts.keys()),
+                    title="Ambulance Status Distribution"
+                )
+                st.plotly_chart(fig, use_container_width=True, key="ambulance_status_pie_chart")
+            ambulance_data = [{
+                'Ambulance ID': a.ambulance_id, 'Driver': a.driver_name,
+                'Status': a.status, 'Fuel %': f"{a.fuel_level:.1f}",
+                'Current Patient': a.current_patient or 'None',
+                'Location': a.current_location
+            } for a in ambulances]
             st.dataframe(pd.DataFrame(ambulance_data), use_container_width=True)
         else:
             st.info("No ambulance data available")
 
     def sha_billing_report(self):
         st.subheader("SHA / SHIF Billing Summary")
-        claims = self.db.get_sha_claims()
+        claims = self.database.get_sha_claims()
         if claims:
             total = sum(c.total_amount for c in claims)
             approved = sum(c.total_amount for c in claims if c.status == 'Approved')
@@ -2601,9 +2962,11 @@ class ReportsUI:
             col2.metric("Total Billed (KSh)", f"{total:,.0f}")
             col3.metric("Approved (KSh)", f"{approved:,.0f}")
             col4.metric("Pending (KSh)", f"{pending:,.0f}")
-            data = [{'Claim ID': c.claim_id, 'Patient': c.patient_id, 'Distance km': c.distance_km,
-                     'Total KSh': c.total_amount, 'Status': c.status,
-                     'Date': c.submitted_at.strftime('%Y-%m-%d')} for c in claims]
+            data = [{
+                'Claim ID': c.claim_id, 'Patient': c.patient_id,
+                'Distance km': c.distance_km, 'Total KSh': c.total_amount,
+                'Status': c.status, 'Date': c.submitted_at.strftime('%Y-%m-%d')
+            } for c in claims]
             st.dataframe(pd.DataFrame(data), use_container_width=True)
         else:
             st.info("No SHA claims yet.")
@@ -2612,52 +2975,74 @@ class ReportsUI:
         st.subheader("Data Export")
         col1, col2 = st.columns(2)
         with col1:
-            st.download_button(label="📊 Export Referrals as CSV", data=self.export_referrals_csv(),
-                               file_name=f"referrals_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv", use_container_width=True)
-            st.download_button(label="🚑 Export Ambulance Data as CSV", data=self.export_ambulances_csv(),
-                               file_name=f"ambulances_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv", use_container_width=True)
+            st.download_button(
+                label="📊 Export Referrals as CSV",
+                data=self.export_referrals_csv(),
+                file_name=f"referrals_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv", use_container_width=True
+            )
+            st.download_button(
+                label="🚑 Export Ambulance Data as CSV",
+                data=self.export_ambulances_csv(),
+                file_name=f"ambulances_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv", use_container_width=True
+            )
         with col2:
-            st.download_button(label="🏛️ Export SHA Claims as CSV", data=self.export_sha_claims_csv(),
-                               file_name=f"sha_claims_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv", use_container_width=True)
-            if st.button("📄 Generate PDF Report", use_container_width=True):
-                st.info("PDF report generation feature would be implemented here")
+            st.download_button(
+                label="🏛️ Export SHA Claims as CSV",
+                data=self.export_sha_claims_csv(),
+                file_name=f"sha_claims_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv", use_container_width=True
+            )
 
     def export_referrals_csv(self):
-        patients = self.db.get_all_patients()
-        data = [{'Patient ID': p.patient_id, 'Name': p.name, 'Age': p.age, 'Condition': p.condition,
-                 'Triage': p.triage_level, 'MEWS': p.mews_score,
-                 'Referring Hospital': p.referring_hospital, 'Receiving Hospital': p.receiving_hospital,
-                 'Status': p.status, 'SHA Verified': p.sha_verified, 'SHA Claim': p.sha_claim_id,
-                 'Billing KSh': p.sha_billing_amount_kes, 'MOH Ref': p.moh_referral_number,
-                 'Referral Time': p.referral_time, 'Assigned Ambulance': p.assigned_ambulance} for p in patients]
+        patients = self.database.get_all_patients()
+        data = [{
+            'Patient ID': p.patient_id, 'Name': p.name, 'Age': p.age,
+            'Condition': p.condition, 'Triage': p.triage_level, 'MEWS': p.mews_score,
+            'Referring Hospital': p.referring_hospital, 'Receiving Hospital': p.receiving_hospital,
+            'Status': p.status, 'SHA Verified': p.sha_verified, 'SHA Claim': p.sha_claim_id,
+            'Billing KSh': p.sha_billing_amount_kes, 'MOH Ref': p.moh_referral_number,
+            'Referral Time': p.referral_time, 'Assigned Ambulance': p.assigned_ambulance
+        } for p in patients]
         return pd.DataFrame(data).to_csv(index=False)
 
     def export_ambulances_csv(self):
-        ambulances = self.db.get_all_ambulances()
-        data = [{'Ambulance ID': a.ambulance_id, 'Driver': a.driver_name, 'Contact': a.driver_contact,
-                 'Status': a.status, 'Location': a.current_location, 'Fuel %': a.fuel_level,
-                 'Current Patient': a.current_patient} for a in ambulances]
+        ambulances = self.database.get_all_ambulances()
+        data = [{
+            'Ambulance ID': a.ambulance_id, 'Driver': a.driver_name,
+            'Contact': a.driver_contact, 'Status': a.status,
+            'Location': a.current_location, 'Fuel %': a.fuel_level,
+            'Current Patient': a.current_patient
+        } for a in ambulances]
         return pd.DataFrame(data).to_csv(index=False)
 
     def export_sha_claims_csv(self):
-        claims = self.db.get_sha_claims()
-        data = [{'Claim ID': c.claim_id, 'Patient ID': c.patient_id, 'Ambulance': c.ambulance_id,
-                 'Distance km': c.distance_km, 'Base KSh': c.base_charge,
-                 'Additional KSh': c.additional_charge, 'Total KSh': c.total_amount,
-                 'Status': c.status, 'Submitted': c.submitted_at} for c in claims]
+        claims = self.database.get_sha_claims()
+        data = [{
+            'Claim ID': c.claim_id, 'Patient ID': c.patient_id, 'Ambulance': c.ambulance_id,
+            'Distance km': c.distance_km, 'Base KSh': c.base_charge,
+            'Additional KSh': c.additional_charge, 'Total KSh': c.total_amount,
+            'Status': c.status, 'Submitted': c.submitted_at
+        } for c in claims]
         return pd.DataFrame(data).to_csv(index=False)
 
 
+# =============================================================================
+# DRIVER UI
+# =============================================================================
 class DriverUI:
-    def __init__(self, db, notification_service):
-        self.db = db
+    def __init__(self, database, notification_service):
+        self.database = database
         self.notification_service = notification_service
-        self.location_simulator = LocationSimulator(db)
+        self.location_simulator = LocationSimulator(database)
 
     def display_driver_dashboard(self):
         st.header("🚑 Ambulance Driver Dashboard")
         driver_name = st.session_state.user.get('name', st.session_state.user['role'])
-        ambulance = self.db.session.query(Ambulance).filter(Ambulance.driver_name == driver_name).first()
+        ambulance = self.database.session.query(Ambulance).filter(
+            Ambulance.driver_name == driver_name
+        ).first()
         if not ambulance:
             st.error("No ambulance assigned to you")
             return
@@ -2668,7 +3053,7 @@ class DriverUI:
         with col3: st.metric("Location", ambulance.current_location)
 
         if ambulance.current_patient and ambulance.status == 'On Transfer':
-            patient = self.db.get_patient_by_id(ambulance.current_patient)
+            patient = self.database.get_patient_by_id(ambulance.current_patient)
             if patient:
                 triage_icon = {'Red': '🔴', 'Orange': '🟠', 'Green': '🟢'}.get(patient.triage_level, '⚪')
                 st.subheader(f"Current Mission — {triage_icon} {patient.triage_level} Triage")
@@ -2681,37 +3066,27 @@ class DriverUI:
                     st.write(f"**Status:** {patient.status}")
                     st.write(f"**SHA Claim:** {patient.sha_claim_id or 'None'}")
                 with col2:
-                    st.subheader("📍 Real-time Location Sharing")
                     if ambulance.latitude and ambulance.longitude:
                         map_data = pd.DataFrame({
-                            'lat': [ambulance.latitude, patient.referring_hospital_lat, patient.receiving_hospital_lat],
-                            'lon': [ambulance.longitude, patient.referring_hospital_lng, patient.receiving_hospital_lng],
+                            'lat': [ambulance.latitude],
+                            'lon': [ambulance.longitude],
                         })
-                        st.map(map_data, use_container_width=True)
+                        st.map(map_data)
                     st.subheader("📍 Update Location")
                     with st.form("location_update_form"):
                         new_lat = st.number_input("Latitude", value=ambulance.latitude or -0.0916)
                         new_lng = st.number_input("Longitude", value=ambulance.longitude or 34.7680)
-                        location_name = st.text_input("Location Name", value=ambulance.current_location or "En route")
+                        location_name = st.text_input(
+                            "Location Name", value=ambulance.current_location or "En route"
+                        )
                         if st.form_submit_button("Update Location", use_container_width=True):
-                            ambulance_service = AmbulanceService(self.db)
-                            if ambulance_service.update_ambulance_location(ambulance.ambulance_id, new_lat, new_lng, location_name, patient.patient_id):
+                            amb_svc = AmbulanceService(self.database)
+                            if amb_svc.update_ambulance_location(
+                                ambulance.ambulance_id, new_lat, new_lng, location_name, patient.patient_id
+                            ):
                                 st.success("Location updated!")
 
-                st.subheader("💬 Real-time Communication")
                 self.display_communication_panel(patient, ambulance)
-
-                st.subheader("Quick Actions")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    if st.button("📝 Update Vitals", use_container_width=True):
-                        self.show_vitals_form(patient)
-                with col2:
-                    if st.button("📍 Update Location", use_container_width=True):
-                        self.update_location_form(ambulance)
-                with col3:
-                    if st.button("🆘 Emergency", use_container_width=True, type="secondary"):
-                        self.send_emergency_alert(ambulance, patient)
 
                 st.subheader("Mission Completion")
                 if st.button("✅ Mark Patient Delivered", use_container_width=True, type="primary"):
@@ -2719,8 +3094,10 @@ class DriverUI:
 
         elif ambulance.status == 'Available':
             st.info("Awaiting assignment...")
-            available_patients = self.db.session.query(Patient).filter(
-                Patient.status == 'Referred', Patient.assigned_ambulance.is_(None)).all()
+            available_patients = self.database.session.query(Patient).filter(
+                Patient.status == 'Referred',
+                Patient.assigned_ambulance.is_(None)
+            ).all()
             if available_patients:
                 st.subheader("Available Missions")
                 for patient in available_patients:
@@ -2734,103 +3111,58 @@ class DriverUI:
                             ambulance.status = 'On Transfer'
                             patient.assigned_ambulance = ambulance.ambulance_id
                             patient.status = 'Ambulance Dispatched'
-                            self.db.session.commit()
+                            self.database.session.commit()
                             if patient.referring_hospital_lat and patient.receiving_hospital_lat:
-                                thread = threading.Thread(target=self.location_simulator.start_simulation,
-                                    args=(ambulance.ambulance_id, patient.patient_id, ambulance.latitude,
-                                          ambulance.longitude, patient.receiving_hospital_lat, patient.receiving_hospital_lng))
+                                thread = threading.Thread(
+                                    target=self.location_simulator.start_simulation,
+                                    args=(
+                                        ambulance.ambulance_id, patient.patient_id,
+                                        ambulance.latitude, ambulance.longitude,
+                                        patient.receiving_hospital_lat, patient.receiving_hospital_lng
+                                    )
+                                )
                                 thread.daemon = True
                                 thread.start()
                             st.success(f"Mission accepted! Assigned to patient {patient.name}")
                             st.rerun()
 
-        st.subheader("Quick Status Updates")
         self.quick_actions(ambulance)
 
     def display_communication_panel(self, patient, ambulance):
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            st.subheader("Chat with Hospitals")
-            communications = self.db.get_communications_for_patient(patient.patient_id)
-            if communications:
-                st.write("**Recent Messages:**")
-                for comm in communications[:5]:
-                    timestamp = comm.timestamp.strftime('%H:%M')
-                    if comm.sender == 'Driver':
-                        st.markdown(f"**You** ({timestamp}): {comm.message}")
-                    else:
-                        st.markdown(f"**{comm.sender}** ({timestamp}): {comm.message}")
-            else:
-                st.info("No messages yet")
-            with st.form("message_form"):
-                message = st.text_area("Type your message", placeholder="Update on patient condition, ETA, or any issues...")
-                recipient = st.selectbox("Send to", [patient.referring_hospital, patient.receiving_hospital, "Both Hospitals"])
-                if st.form_submit_button("Send Message", use_container_width=True):
-                    if message:
-                        hospitals = [patient.referring_hospital, patient.receiving_hospital] if recipient == "Both Hospitals" else [recipient]
-                        for hospital in hospitals:
-                            self.db.add_communication({'patient_id': patient.patient_id, 'ambulance_id': ambulance.ambulance_id,
-                                                        'sender': 'Driver', 'receiver': hospital,
-                                                        'message': message, 'message_type': 'driver_hospital'})
-                        st.success("Message sent!")
-                        st.rerun()
-                    else:
-                        st.error("Please enter a message")
-        with col2:
-            st.subheader("Quick Updates")
-            quick_messages = {
-                "ETA 10 mins": "Estimated arrival in 10 minutes",
-                "Patient stable": "Patient condition is stable during transport",
-                "Traffic delay": "Experiencing traffic delays, will update ETA",
-                "Need assistance": "Require medical assistance upon arrival",
-                "Vitals normal": "Patient vital signs are within normal range"
-            }
-            for label, message in quick_messages.items():
-                if st.button(label, key=f"quick_{label}", use_container_width=True):
-                    for hospital in [patient.referring_hospital, patient.receiving_hospital]:
-                        self.db.add_communication({'patient_id': patient.patient_id, 'ambulance_id': ambulance.ambulance_id,
-                                                    'sender': 'Driver', 'receiver': hospital,
-                                                    'message': f"Quick update: {message}", 'message_type': 'driver_hospital'})
-                    st.success("Quick update sent!")
-
-    def show_vitals_form(self, patient):
-        with st.form("vitals_form"):
-            st.subheader("Update Patient Vitals")
-            bp = st.text_input("Blood Pressure", value="120/80")
-            heart_rate = st.number_input("Heart Rate (bpm)", min_value=0, max_value=200, value=72)
-            spo2 = st.number_input("Oxygen Saturation (%)", min_value=0, max_value=100, value=98)
-            respiratory_rate = st.number_input("Respiratory Rate", min_value=0, max_value=60, value=16)
-            notes = st.text_area("Observations")
-            if st.form_submit_button("Update Vitals", use_container_width=True):
-                patient.vital_signs = {'blood_pressure': bp, 'heart_rate': heart_rate,
-                                       'oxygen_saturation': spo2, 'respiratory_rate': respiratory_rate,
-                                       'notes': notes, 'timestamp': datetime.utcnow().isoformat()}
-                self.db.session.commit()
-                for hospital in [patient.referring_hospital, patient.receiving_hospital]:
-                    self.db.add_communication({'patient_id': patient.patient_id, 'sender': 'Driver', 'receiver': hospital,
-                                               'message': f"Vitals updated: BP {bp}, HR {heart_rate}bpm, SpO2 {spo2}%",
-                                               'message_type': 'vitals_update'})
-                st.success("Vitals updated and hospitals notified!")
-
-    def update_location_form(self, ambulance):
-        with st.form("location_form"):
-            st.subheader("Update Current Location")
-            location_name = st.text_input("Location Name", value=ambulance.current_location)
-            latitude = st.number_input("Latitude", value=ambulance.latitude or -0.0916)
-            longitude = st.number_input("Longitude", value=ambulance.longitude or 34.7680)
-            if st.form_submit_button("Update Location", use_container_width=True):
-                ambulance_service = AmbulanceService(self.db)
-                if ambulance_service.update_ambulance_location(ambulance.ambulance_id, latitude, longitude, location_name, ambulance.current_patient):
-                    st.success("Location updated!")
-
-    def send_emergency_alert(self, ambulance, patient):
-        st.error("🚨 EMERGENCY ALERT SENT!")
-        emergency_message = f"EMERGENCY: Ambulance {ambulance.ambulance_id} requires immediate assistance!"
-        for recipient in [patient.referring_hospital, patient.receiving_hospital, "Control Center"]:
-            self.db.add_communication({'patient_id': patient.patient_id, 'ambulance_id': ambulance.ambulance_id,
-                                        'sender': 'Driver', 'receiver': recipient,
-                                        'message': emergency_message, 'message_type': 'emergency'})
-        self.notification_service.send_notification("Control Center", emergency_message, 'emergency')
+        st.subheader("💬 Communication")
+        communications = self.database.get_communications_for_patient(patient.patient_id)
+        if communications:
+            for comm in communications[:5]:
+                timestamp = comm.timestamp.strftime('%H:%M')
+                if comm.sender == 'Driver':
+                    st.markdown(f"**You** ({timestamp}): {comm.message}")
+                else:
+                    st.markdown(f"**{comm.sender}** ({timestamp}): {comm.message}")
+        else:
+            st.info("No messages yet")
+        with st.form("message_form"):
+            message = st.text_area("Type your message")
+            recipient = st.selectbox(
+                "Send to",
+                [patient.referring_hospital, patient.receiving_hospital, "Both Hospitals"]
+            )
+            if st.form_submit_button("Send Message", use_container_width=True):
+                if message:
+                    hospitals_list = (
+                        [patient.referring_hospital, patient.receiving_hospital]
+                        if recipient == "Both Hospitals" else [recipient]
+                    )
+                    for hospital in hospitals_list:
+                        self.database.add_communication({
+                            'patient_id': patient.patient_id,
+                            'ambulance_id': ambulance.ambulance_id,
+                            'sender': 'Driver', 'receiver': hospital,
+                            'message': message, 'message_type': 'driver_hospital'
+                        })
+                    st.success("Message sent!")
+                    st.rerun()
+                else:
+                    st.error("Please enter a message")
 
     def complete_mission(self, ambulance, patient):
         ambulance.status = 'Available'
@@ -2838,65 +3170,73 @@ class DriverUI:
         ambulance.mission_complete = True
         patient.status = 'Arrived at Destination'
         if patient.sha_claim_id:
-            claim = self.db.session.query(SHAClaim).filter(SHAClaim.claim_id == patient.sha_claim_id).first()
+            claim = self.database.session.query(SHAClaim).filter(
+                SHAClaim.claim_id == patient.sha_claim_id
+            ).first()
             if claim:
                 claim.status = 'Approved'
                 claim.approved_at = datetime.utcnow()
-        self.db.session.commit()
-        self.db.log_action('driver', 'Ambulance Driver', 'COMPLETE_MISSION', 'Patient',
-                           patient.patient_id, f"Patient delivered via {ambulance.ambulance_id}")
+        self.database.session.commit()
+        self.database.log_action(
+            'driver', 'Ambulance Driver', 'COMPLETE_MISSION', 'Patient',
+            patient.patient_id, f"Patient delivered via {ambulance.ambulance_id}"
+        )
         arrival_message = f"Patient {patient.name} has arrived via ambulance {ambulance.ambulance_id}"
         for hospital in [patient.referring_hospital, patient.receiving_hospital]:
-            self.db.add_communication({'patient_id': patient.patient_id, 'ambulance_id': ambulance.ambulance_id,
-                                        'sender': 'Driver', 'receiver': hospital,
-                                        'message': arrival_message, 'message_type': 'arrival_notification'})
+            self.database.add_communication({
+                'patient_id': patient.patient_id,
+                'ambulance_id': ambulance.ambulance_id,
+                'sender': 'Driver', 'receiver': hospital,
+                'message': arrival_message, 'message_type': 'arrival_notification'
+            })
         self.notification_service.send_notification(patient.receiving_hospital, arrival_message, 'arrival')
         st.success("Mission completed! Patient delivered successfully.")
         st.balloons()
 
     def quick_actions(self, ambulance):
+        st.subheader("Quick Status Updates")
         col1, col2, col3 = st.columns(3)
         with col1:
             if st.button("🔄 Mark Available", use_container_width=True):
                 ambulance.status = 'Available'
                 ambulance.current_patient = None
-                self.db.session.commit()
+                self.database.session.commit()
                 st.success("Status updated to Available")
                 st.rerun()
         with col2:
             if st.button("⛑️ Mark On Break", use_container_width=True):
                 ambulance.status = 'On Break'
-                self.db.session.commit()
+                self.database.session.commit()
                 st.success("Status updated to On Break")
                 st.rerun()
         with col3:
             if st.button("🔧 Maintenance", use_container_width=True):
                 ambulance.status = 'Maintenance'
-                self.db.session.commit()
+                self.database.session.commit()
                 st.success("Status updated to Maintenance")
                 st.rerun()
 
+
 # =============================================================================
-# MAIN APPLICATION — UPDATED WITH NEW TABS FOR CRITICAL GAPS
+# MAIN APPLICATION
 # =============================================================================
 class HospitalReferralApp:
     def __init__(self):
         self.auth = Authentication()
-        self.db = Database()
-        initialize_sample_data(self.db)
-        self.analytics = AnalyticsService(self.db)
-        self.notifications = NotificationService(self.db)
-        self.dashboard_ui = DashboardUI(self.db, self.analytics)
-        self.referral_ui = ReferralUI(self.db, self.notifications)
-        self.tracking_ui = TrackingUI(self.db)
-        self.handover_ui = HandoverUI(self.db)
-        self.communication_ui = CommunicationUI(self.db, self.notifications)
-        self.reports_ui = ReportsUI(self.db, self.analytics)
-        self.driver_ui = DriverUI(self.db, self.notifications)
-        # New UIs for critical gaps
-        self.sha_ui = SHABillingUI(self.db)
-        self.bed_ui = BedManagementUI(self.db)
-        self.audit_ui = AuditLogUI(self.db)
+        self.database = Database()
+        initialize_sample_data(self.database)
+        self.analytics = AnalyticsService(self.database)
+        self.notifications = NotificationService(self.database)
+        self.dashboard_ui = DashboardUI(self.database, self.analytics)
+        self.referral_ui = ReferralUI(self.database, self.notifications)
+        self.tracking_ui = TrackingUI(self.database)
+        self.handover_ui = HandoverUI(self.database)
+        self.communication_ui = CommunicationUI(self.database, self.notifications)
+        self.reports_ui = ReportsUI(self.database, self.analytics)
+        self.driver_ui = DriverUI(self.database, self.notifications)
+        self.sha_ui = SHABillingUI(self.database)
+        self.bed_ui = BedManagementUI(self.database)
+        self.audit_ui = AuditLogUI(self.database)
 
         if 'authenticated' not in st.session_state:
             st.session_state.authenticated = False
@@ -2928,21 +3268,13 @@ class HospitalReferralApp:
         - Ambulance Driver: `driver` / `driver123`
         """)
 
-        st.subheader("System Overview")
         col1, col2, col3, col4 = st.columns(4)
         with col1: st.metric("Hospitals in Network", "40")
         with col2: st.metric("Ambulances", "20")
         with col3: st.metric("Coverage Area", "Kisumu County")
         with col4: st.metric("SHA Integration", "✅ Active")
 
-        st.subheader("Referral Rules")
-        st.markdown("""
-        - **JOOTRH**: Receives referrals from all facilities
-        - **Kisumu County Referral Hospital**: Can refer and receive patients
-        - **Other 38 Hospitals**: Refer to the two referral hospitals only
-        """)
-
-        st.subheader("New in this version — Critical Gaps Addressed")
+        st.subheader("System Features")
         st.markdown("""
         | # | Feature | Status |
         |---|---------|--------|
@@ -2957,7 +3289,11 @@ class HospitalReferralApp:
         user_role = st.session_state.user['role']
         user_name = st.session_state.user.get('name', st.session_state.user['role'])
         st.sidebar.markdown("---")
-        st.sidebar.info(f"**Logged in as:** {user_name}\n\n**Role:** {user_role}\n\n**Hospital:** {st.session_state.user['hospital']}")
+        st.sidebar.info(
+            f"**Logged in as:** {user_name}\n\n"
+            f"**Role:** {user_role}\n\n"
+            f"**Hospital:** {st.session_state.user['hospital']}"
+        )
         if user_role == 'Admin':
             self.render_admin_interface()
         elif user_role == 'Hospital Staff':
@@ -2968,7 +3304,6 @@ class HospitalReferralApp:
         st.markdown("**Kisumu County Hospital Referral System** | SHA Integrated • MOH Compliant • FHIR R4 Ready")
 
     def render_admin_interface(self):
-        st.sidebar.title("Admin Navigation")
         tabs = st.tabs([
             "📊 Dashboard", "📋 Referrals", "🚑 Tracking", "📄 Handovers",
             "🏛️ SHA Billing", "🏥 Bed Management", "💬 Communication",
@@ -2986,7 +3321,6 @@ class HospitalReferralApp:
         with tabs[9]: self.render_user_management()
 
     def render_staff_interface(self):
-        st.sidebar.title("Staff Navigation")
         tabs = st.tabs([
             "📊 Dashboard", "📋 Referrals", "🚑 Tracking", "📄 Handovers",
             "🏛️ SHA Billing", "🏥 Bed Management", "💬 Communication"
@@ -3013,11 +3347,14 @@ class HospitalReferralApp:
                     password = st.text_input("Password", type="password")
                     email = st.text_input("Email")
                     role = st.selectbox("Role", ["Admin", "Hospital Staff", "Ambulance Driver"])
-                    hospital = st.selectbox("Hospital", ["All Facilities",
-                        "Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)",
-                        "Kisumu County Referral Hospital"] + hospitals_data['facility_name'][2:])
+                    hospital = st.selectbox(
+                        "Hospital",
+                        ["All Facilities",
+                         "Jaramogi Oginga Odinga Teaching & Referral Hospital (JOOTRH)",
+                         "Kisumu County Referral Hospital"] + hospitals_data['facility_name'][2:]
+                    )
                     if st.form_submit_button("Add User", use_container_width=True):
-                        self.db.log_action('admin', 'Admin', 'CREATE_USER', 'User', username, f"Role: {role}")
+                        self.database.log_action('admin', 'Admin', 'CREATE_USER', 'User', username, f"Role: {role}")
                         st.success(f"User {username} added successfully")
             with col2:
                 st.subheader("Current Users")
@@ -3029,6 +3366,7 @@ class HospitalReferralApp:
                 ]
                 st.dataframe(users_data)
 
+
 # =============================================================================
 # RUN APPLICATION
 # =============================================================================
@@ -3039,7 +3377,6 @@ if __name__ == "__main__":
         layout=Config.LAYOUT,
         initial_sidebar_state="expanded"
     )
-
     st.markdown("""
     <style>
     .main-header { font-size: 2.5rem; color: #1f77b4; text-align: center; margin-bottom: 2rem; }
@@ -3047,6 +3384,5 @@ if __name__ == "__main__":
     .stButton button { width: 100%; }
     </style>
     """, unsafe_allow_html=True)
-
     app = HospitalReferralApp()
     app.run()
