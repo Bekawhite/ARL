@@ -1,12 +1,29 @@
-streamlit
-sqlalchemy
-pandas
-numpy
-plotly
-pydeck
-reportlab
-qrcode[pil]
-pillow
-python-dotenv
-requests
-django
+# Core framework
+streamlit>=1.35.0
+
+# Django ORM (database layer)
+django>=4.2.0
+
+# Data processing
+pandas>=2.0.0
+
+# Optional: Charts & visualizations
+plotly>=5.18.0
+
+# Optional: Map rendering
+pydeck>=0.8.0
+
+# Optional: PDF generation
+reportlab>=4.0.0
+
+# Optional: QR code generation
+qrcode[pil]>=7.4.0
+
+# Optional: Image processing (used by qrcode)
+Pillow>=10.0.0
+
+# Optional: Environment variables
+python-dotenv>=1.0.0
+
+psycopg2-binary>=2.9.9   # PostgreSQL
+mysqlclient>=2.2.0       # MySQL
