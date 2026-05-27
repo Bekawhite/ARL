@@ -24,7 +24,7 @@ fpdf
 pydeck
 
 
-
+qrcode[pil]
 
 torch
 transformers
