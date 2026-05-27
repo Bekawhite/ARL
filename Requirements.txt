@@ -1,9 +1,9 @@
 # Core framework
 streamlit>=1.35.0
 
-# Django ORM (database layer)
-django>=4.2.0
-
+sqlalchemy[asyncio]
+psycopg2-binary
+pymysql
 # Data processing
 pandas>=2.0.0
 
