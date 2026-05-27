@@ -9,3 +9,4 @@ qrcode[pil]
 pillow
 python-dotenv
 requests
+django
